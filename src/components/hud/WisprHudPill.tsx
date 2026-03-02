@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type HudState = "idle" | "listening" | "finalizing" | "injecting" | "success" | "error";
 
@@ -11,146 +11,93 @@ type HudLevelEvent = {
   level: number;
 };
 
-function resolveStatusMessage(state: HudState, message?: string, error?: string | null) {
-  if (state === "error") return message || error || "Erro ao transcrever";
-  if (state === "success") return message || "Concluido";
-  return "";
+const BAR_COUNT = 40;
+
+// Matches the reference demo: irregular profile so the wave doesn't look like a perfect bell.
+const AMPLITUDE_PROFILE: number[] = [
+  0.18, 0.32, 0.22, 0.55, 0.28, 0.72, 0.38, 0.91, 0.45, 0.62, 0.3, 0.85, 0.42, 0.98, 0.55, 0.78, 0.35,
+  0.65, 0.2, 0.88, 0.95, 0.4, 0.75, 0.25, 0.82, 0.5, 0.68, 0.33, 0.9, 0.48, 0.7, 0.22, 0.58, 0.85, 0.3,
+  0.65, 0.42, 0.78, 0.25, 0.15,
+];
+
+function clamp01(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+function formatDuration(sec: number) {
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}m${s}s`;
 }
 
 export default function WisprHudPill() {
   const [hudState, setHudState] = useState<HudState>("idle");
+  const [durationSec, setDurationSec] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [visible, setVisible] = useState(false);
-  const [durationSec, setDurationSec] = useState(0);
-  const successTimerRef = useRef<number | null>(null);
-  const startedAtRef = useRef<number | null>(null);
+
   const targetLevelRef = useRef(0);
   const smoothedLevelRef = useRef(0);
+  const startedAtRef = useRef<number | null>(null);
+  const timerRef = useRef<number | null>(null);
   const rafRef = useRef<number | null>(null);
-  const barsRef = useRef<Array<HTMLSpanElement | null>>([]);
-  const barStateRef = useRef<Float32Array>(new Float32Array(20));
+  const hudStateRef = useRef<HudState>("idle");
+  const barsRef = useRef<Array<HTMLSpanElement | null>>(Array.from({ length: BAR_COUNT }, () => null));
 
-  useEffect(() => {
-    if (!window.voiceNoteAI) return;
+  const noise = useRef(
+    AMPLITUDE_PROFILE.map((_, i) => ({
+      phase: i * 0.71 + ((i * 137.508) % 6.28),
+      speed: 5.5 + ((i * 0.618) % 6),
+      speed2: 2.8 + ((i * 0.382) % 4),
+    })),
+  );
 
-    const offHud = window.voiceNoteAI.onHudState((payload: HudEvent) => {
-      setHudState(payload.state);
-      if (payload.state === "idle") {
-        setVisible(false);
-        setError(null);
-        setSuccessMessage(null);
-        setDurationSec(0);
-        startedAtRef.current = null;
-        targetLevelRef.current = 0;
-        smoothedLevelRef.current = 0;
-        barStateRef.current.fill(0);
-        return;
-      }
+  hudStateRef.current = hudState;
 
-      setVisible(true);
-      if (payload.state === "listening") {
-        startedAtRef.current = Date.now();
-        setError(null);
-        setSuccessMessage(null);
-      }
-      if (payload.state === "error") {
-        setError(payload.message ?? "Erro ao transcrever");
-      }
-      if (payload.state === "success") {
-        setSuccessMessage(payload.message ?? null);
-        if (successTimerRef.current !== null) window.clearTimeout(successTimerRef.current);
-        successTimerRef.current = window.setTimeout(() => {
-          setVisible(false);
-        }, 1100);
-      }
-    });
-
-    const offFinal = window.voiceNoteAI.onSttFinal(() => {
-      setHudState("injecting");
-    });
-
-    const offError = window.voiceNoteAI.onSttError((payload) => {
-      setHudState("error");
-      setError(payload.message);
-    });
-
-    const offLevel = window.voiceNoteAI.onHudLevel((payload: HudLevelEvent) => {
-      // 0..1
-      targetLevelRef.current = Math.max(0, Math.min(1, Number(payload.level) || 0));
-    });
-
-    return () => {
-      offHud();
-      offFinal();
-      offError();
-      offLevel();
-      if (successTimerRef.current !== null) {
-        window.clearTimeout(successTimerRef.current);
-      }
-    };
+  const stopRaf = useCallback(() => {
+    if (rafRef.current != null) {
+      window.cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
   }, []);
 
-  useEffect(() => {
-    if (hudState !== "listening") {
-      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-      return;
+  const stopTimer = useCallback(() => {
+    if (timerRef.current != null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
     }
+  }, []);
 
-    const count = 20;
-    const envelope = Array.from({ length: count }, (_v, index) => {
-      // Smooth bell curve: center stronger, edges softer (Wispr-like).
-      const x = (index / (count - 1)) * 2 - 1; // [-1..1]
-      return Math.exp(-(x * x) * 1.35);
-    });
-
-    const IDLE_FLOOR = 0.06; // subtle motion even in low voice / silence
-    const LEVEL_CURVE = 0.72; // < 1 boosts low values
-    const SCALE_MIN = 0.18;
-    const SCALE_RANGE = 1.85;
-
+  const startWave = useCallback(() => {
+    stopRaf();
     const tick = () => {
-      const target = targetLevelRef.current;
-      const prev = smoothedLevelRef.current;
+      if (hudStateRef.current !== "listening") return;
 
-      // Fast attack, slower release for a natural VU feel.
-      const next = target > prev ? prev + (target - prev) * 0.55 : prev + (target - prev) * 0.18;
-      smoothedLevelRef.current = next;
+      const t = targetLevelRef.current;
+      const p = smoothedLevelRef.current;
+      smoothedLevelRef.current = p + (t > p ? 0.55 : 0.12) * (t - p);
 
-      const t = performance.now() / 1000;
-      const drive = Math.max(next, IDLE_FLOOR);
-      const energy = Math.pow(Math.max(0, Math.min(1, drive)), LEVEL_CURVE);
-
+      const s = smoothedLevelRef.current;
+      const now = performance.now() / 1000;
       const bars = barsRef.current;
-      const state = barStateRef.current;
 
-      for (let i = 0; i < count; i += 1) {
-        const env = envelope[i] ?? 0;
+      for (let i = 0; i < BAR_COUNT; i += 1) {
+        const profile = AMPLITUDE_PROFILE[i] ?? 0.3;
+        const { phase, speed, speed2 } = noise.current[i] ?? { phase: i * 0.7, speed: 6, speed2: 3 };
+        const osc =
+          0.2 * Math.sin(now * speed + phase) +
+          0.1 * Math.sin(now * speed2 + phase * 1.4) +
+          0.05 * Math.sin(now * speed * 2.3 + i * 0.3);
 
-        // Traveling waves create a "flowing" look instead of jitter.
-        const travel1 = Math.sin(t * 7.4 - i * 0.85);
-        const travel2 = Math.sin(t * 3.1 + i * 1.55);
-        const shimmer = Math.sin(t * 12.0 + i * 0.33);
-
-        // Base height follows energy + envelope; wobble remains visible even when quiet.
-        const wave = 0.55 * travel1 + 0.45 * travel2;
-        const wobble = (0.28 + 0.72 * energy) * (0.5 + 0.5 * wave) + 0.12 * shimmer;
-
-        const raw = env * (0.18 + 0.82 * energy) + env * wobble * (0.18 + 0.62 * energy);
-        const targetBar = Math.max(0, Math.min(1, raw));
-
-        // Per-bar smoothing: less "digital", more organic.
-        const prevBar = state[i] ?? 0;
-        const k = targetBar > prevBar ? 0.34 : 0.16;
-        const nextBar = prevBar + (targetBar - prevBar) * k;
-        state[i] = nextBar;
+        // The max(s, 0.08) keeps the wave alive even when speaking quietly.
+        const v = clamp01(s * profile + osc * Math.max(s, 0.08));
+        const heightPx = 2 + v * 30;
 
         const el = bars[i];
         if (el) {
-          const scaleY = SCALE_MIN + nextBar * SCALE_RANGE;
-          el.style.transform = `scaleY(${scaleY})`;
-          el.style.opacity = String(0.45 + nextBar * 0.55);
+          el.style.height = `${heightPx}px`;
+          el.style.opacity = String(0.35 + v * 0.65);
         }
       }
 
@@ -158,58 +105,142 @@ export default function WisprHudPill() {
     };
 
     rafRef.current = window.requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    };
-  }, [hudState]);
+  }, [stopRaf]);
+
+  const resetBars = useCallback(() => {
+    const bars = barsRef.current;
+    for (let i = 0; i < BAR_COUNT; i += 1) {
+      const el = bars[i];
+      if (!el) continue;
+      el.style.height = "2px";
+      el.style.opacity = "0.35";
+    }
+  }, []);
+
+  const resolveLabel = useCallback(() => {
+    if (hudState === "error") return error || "Erro ao transcrever";
+    if (hudState === "success") return successMessage || "Concluido";
+    return "";
+  }, [error, hudState, successMessage]);
 
   useEffect(() => {
-    if (hudState !== "listening") return;
-    const timer = window.setInterval(() => {
-      if (!startedAtRef.current) return;
-      setDurationSec(Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000)));
-    }, 200);
-    return () => window.clearInterval(timer);
-  }, [hudState]);
+    if (!window.voiceNoteAI) return;
 
-  const shouldShowText = hudState === "success" || hudState === "error";
-  const text = shouldShowText ? resolveStatusMessage(hudState, successMessage ?? undefined, error) : "";
-  const waveBars = useMemo(() => Array.from({ length: 20 }), []);
+    const offHud = window.voiceNoteAI.onHudState((payload: HudEvent) => {
+      const prev = hudStateRef.current;
+      setHudState(payload.state);
+
+      if (payload.state === "idle") {
+        setError(null);
+        setSuccessMessage(null);
+        setDurationSec(0);
+        startedAtRef.current = null;
+        smoothedLevelRef.current = 0;
+        stopTimer();
+        stopRaf();
+        resetBars();
+        return;
+      }
+
+      if (payload.state === "listening") {
+        setError(null);
+        setSuccessMessage(null);
+        startedAtRef.current = Date.now();
+        smoothedLevelRef.current = 0;
+        setDurationSec(0);
+
+        stopTimer();
+        timerRef.current = window.setInterval(() => {
+          if (!startedAtRef.current) return;
+          setDurationSec(Math.max(0, Math.floor((Date.now() - startedAtRef.current) / 1000)));
+        }, 200);
+
+        startWave();
+        return;
+      }
+
+      if (payload.state === "error") {
+        setError(payload.message ?? "Erro ao transcrever");
+        if (prev === "listening") {
+          stopTimer();
+          stopRaf();
+          resetBars();
+        }
+        return;
+      }
+
+      if (payload.state === "success") {
+        setSuccessMessage(payload.message ?? null);
+        if (prev === "listening") {
+          stopTimer();
+          stopRaf();
+          resetBars();
+        }
+        return;
+      }
+
+      // Any other non-listening state: ensure capture-related loops are stopped.
+      if (prev === "listening") {
+        stopTimer();
+        stopRaf();
+        resetBars();
+      }
+    });
+
+    const offLevel = window.voiceNoteAI.onHudLevel((payload: HudLevelEvent) => {
+      targetLevelRef.current = clamp01(Number(payload.level) || 0);
+    });
+
+    return () => {
+      offHud();
+      offLevel();
+      stopTimer();
+      stopRaf();
+    };
+  }, [resetBars, startWave, stopRaf, stopTimer]);
+
+  const isIdle = hudState === "idle";
+  const isListening = hudState === "listening";
+  const isProcessing = hudState === "finalizing" || hudState === "injecting";
+  const showLabel = hudState === "success" || hudState === "error";
+  const isExpanded = !isIdle;
+
+  const labelText = resolveLabel();
+  const labelClass = hudState === "error" ? "error" : hudState === "success" ? "success" : "neutral";
+
+  const bars = useMemo(() => Array.from({ length: BAR_COUNT }), []);
 
   return (
     <div className="hud-root">
-      <div className={`hud-pill state-${hudState} ${visible ? "visible" : ""}`}>
-        <span className={`hud-dot ${hudState === "listening" ? "listening" : ""}`} />
+      <div className="hud-stage">
+        <div className={`hud-pill state-${hudState} ${isExpanded ? "expanded" : ""}`}>
+          {isProcessing ? <span className="hud-shimmer" aria-hidden /> : null}
 
-        {hudState === "listening" ? (
-          <div className="hud-wave" aria-hidden>
-            {waveBars.map((_, index) => (
-              <span
-                key={index}
-                className="hud-wave-bar"
-                ref={(el) => {
-                  barsRef.current[index] = el;
-                }}
-              />
-            ))}
-          </div>
-        ) : null}
+          <span className="hud-dot" />
 
-        {hudState === "listening" ? <div className="hud-spacer" aria-hidden /> : null}
+          {isListening ? (
+            <div className="hud-wave" aria-hidden>
+              {bars.map((_, i) => (
+                <span
+                  key={i}
+                  className="hud-wave-bar"
+                  ref={(el) => {
+                    barsRef.current[i] = el;
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
 
-        {shouldShowText ? (
-          <div className={`hud-text ${hudState === "error" ? "error" : hudState === "success" ? "success" : ""}`}>
-            {text}
-          </div>
-        ) : null}
+          {showLabel ? <span className={`hud-label ${labelClass}`}>{labelText}</span> : null}
 
-        {hudState === "listening" ? (
-          <>
-            <span className="hud-sep" />
-            <span className="hud-meta">{durationSec}s</span>
-          </>
-        ) : null}
+          {isListening ? (
+            <>
+              <span className="hud-sep" />
+              <span className="hud-meta">{formatDuration(durationSec)}</span>
+            </>
+          ) : null}
+        </div>
       </div>
     </div>
   );
