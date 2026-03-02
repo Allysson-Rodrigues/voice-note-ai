@@ -12,6 +12,7 @@ dist
 dist-ssr
 electron-dist
 *.local
+WisprHUD.jsx
 
 # Editor directories and files
 .vscode/*
