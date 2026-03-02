@@ -23,12 +23,13 @@ export default function WisprHudPill() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
-  const [barLevels, setBarLevels] = useState<number[]>(() => Array.from({ length: 20 }, () => 0));
   const successTimerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
   const targetLevelRef = useRef(0);
   const smoothedLevelRef = useRef(0);
   const rafRef = useRef<number | null>(null);
+  const barsRef = useRef<Array<HTMLSpanElement | null>>([]);
+  const barStateRef = useRef<Float32Array>(new Float32Array(20));
 
   useEffect(() => {
     if (!window.voiceNoteAI) return;
@@ -43,7 +44,7 @@ export default function WisprHudPill() {
         startedAtRef.current = null;
         targetLevelRef.current = 0;
         smoothedLevelRef.current = 0;
-        setBarLevels(Array.from({ length: 20 }, () => 0));
+        barStateRef.current.fill(0);
         return;
       }
 
@@ -97,12 +98,17 @@ export default function WisprHudPill() {
       return;
     }
 
-    const base = Array.from({ length: 20 }, (_v, index) => {
-      // Deterministic "shape" across bars: center slightly louder.
-      const x = index / 19;
-      const bell = 1 - Math.abs(x - 0.5) * 1.35;
-      return 0.45 + 0.55 * Math.max(0, Math.min(1, bell));
+    const count = 20;
+    const envelope = Array.from({ length: count }, (_v, index) => {
+      // Smooth bell curve: center stronger, edges softer (Wispr-like).
+      const x = (index / (count - 1)) * 2 - 1; // [-1..1]
+      return Math.exp(-(x * x) * 1.35);
     });
+
+    const IDLE_FLOOR = 0.06; // subtle motion even in low voice / silence
+    const LEVEL_CURVE = 0.72; // < 1 boosts low values
+    const SCALE_MIN = 0.18;
+    const SCALE_RANGE = 1.85;
 
     const tick = () => {
       const target = targetLevelRef.current;
@@ -113,14 +119,41 @@ export default function WisprHudPill() {
       smoothedLevelRef.current = next;
 
       const t = performance.now() / 1000;
-      const levels = base.map((shape, index) => {
-        const phase = t * 8 + index * 0.35;
-        const wobble = 0.12 * Math.sin(phase) + 0.06 * Math.sin(phase * 0.6);
-        const value = next * shape + wobble * next;
-        return Math.max(0, Math.min(1, value));
-      });
+      const drive = Math.max(next, IDLE_FLOOR);
+      const energy = Math.pow(Math.max(0, Math.min(1, drive)), LEVEL_CURVE);
 
-      setBarLevels(levels);
+      const bars = barsRef.current;
+      const state = barStateRef.current;
+
+      for (let i = 0; i < count; i += 1) {
+        const env = envelope[i] ?? 0;
+
+        // Traveling waves create a "flowing" look instead of jitter.
+        const travel1 = Math.sin(t * 7.4 - i * 0.85);
+        const travel2 = Math.sin(t * 3.1 + i * 1.55);
+        const shimmer = Math.sin(t * 12.0 + i * 0.33);
+
+        // Base height follows energy + envelope; wobble remains visible even when quiet.
+        const wave = 0.55 * travel1 + 0.45 * travel2;
+        const wobble = (0.28 + 0.72 * energy) * (0.5 + 0.5 * wave) + 0.12 * shimmer;
+
+        const raw = env * (0.18 + 0.82 * energy) + env * wobble * (0.18 + 0.62 * energy);
+        const targetBar = Math.max(0, Math.min(1, raw));
+
+        // Per-bar smoothing: less "digital", more organic.
+        const prevBar = state[i] ?? 0;
+        const k = targetBar > prevBar ? 0.34 : 0.16;
+        const nextBar = prevBar + (targetBar - prevBar) * k;
+        state[i] = nextBar;
+
+        const el = bars[i];
+        if (el) {
+          const scaleY = SCALE_MIN + nextBar * SCALE_RANGE;
+          el.style.transform = `scaleY(${scaleY})`;
+          el.style.opacity = String(0.45 + nextBar * 0.55);
+        }
+      }
+
       rafRef.current = window.requestAnimationFrame(tick);
     };
 
@@ -155,8 +188,8 @@ export default function WisprHudPill() {
               <span
                 key={index}
                 className="hud-wave-bar"
-                style={{
-                  transform: `scaleY(${0.25 + barLevels[index] * 1.25})`,
+                ref={(el) => {
+                  barsRef.current[index] = el;
                 }}
               />
             ))}
