@@ -57,6 +57,27 @@ function applyExplicitFormattingCommands(value: string) {
   next = next.replace(/\b(?:nova linha|new line)\b/gi, "\n");
   next = next.replace(/\b(?:bullet point|bullet|t[oó]pico|topico)\b/gi, "\n•");
   next = next.replace(/\b(?:item|n[uú]mero|numero|number)\s+(\d{1,2})\b/gi, (_entry, n: string) => `\n${n}.`);
+
+  // PT-BR punctuation commands (explicit)
+  next = next.replace(/\b(?:vírgula|virgula)\b/gi, ",");
+  next = next.replace(/\b(?:ponto e vírgula|ponto e virgula)\b/gi, ";");
+  next = next.replace(/\b(?:dois pontos)\b/gi, ":");
+  next = next.replace(/\b(?:ponto)\b/gi, ".");
+  next = next.replace(/\b(?:interrogação|interrogacao|ponto de interrogação|ponto de interrogacao)\b/gi, "?");
+  next = next.replace(/\b(?:exclamação|exclamacao|ponto de exclamação|ponto de exclamacao)\b/gi, "!");
+  next = next.replace(/\b(?:reticências|reticencias)\b/gi, "...");
+
+  // Parentheses / quotes
+  next = next.replace(/\b(?:abre parênteses|abre parenteses)\b/gi, "(");
+  next = next.replace(/\b(?:fecha parênteses|fecha parenteses)\b/gi, ")");
+  next = next.replace(/\b(?:abre aspas)\b/gi, "\"");
+  next = next.replace(/\b(?:fecha aspas)\b/gi, "\"");
+
+  // Normalize spaces around punctuation.
+  next = next.replace(/\s+([,.;:!?])/g, "$1");
+  next = next.replace(/([,.;:!?])(?!\s|\n|$)/g, "$1 ");
+  next = next.replace(/\(\s+/g, "(").replace(/\s+\)/g, ")");
+
   next = next.replace(/\n[ \t]*/g, "\n");
   next = next.replace(/(^|\n)•(?!\s)/g, "$1• ");
   next = next.replace(/(^|\n)(\d+\.)\s*/g, "$1$2 ");

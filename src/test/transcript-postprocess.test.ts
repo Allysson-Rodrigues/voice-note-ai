@@ -33,4 +33,13 @@ describe("transcript postprocess commands", () => {
     );
     expect(output).toBe("Item 1 revisar contrato");
   });
+
+  it("applies pt-br punctuation commands", () => {
+    const output = applyTranscriptPostprocess(
+      "Olá vírgula tudo bem interrogação nova linha abre parênteses teste fecha parênteses ponto",
+      { toneMode: "casual", canonicalTerms, formatCommandsEnabled: true },
+    );
+
+    expect(output).toBe("Olá, tudo bem?\n(teste).");
+  });
 });
