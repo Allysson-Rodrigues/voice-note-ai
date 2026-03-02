@@ -1342,6 +1342,23 @@ function feedAudioChunk(session: SttSession, chunk: Buffer) {
   }
 }
 
+function computePcm16Level(chunk: Buffer) {
+  // chunk is 16kHz mono PCM16 little-endian
+  const sampleCount = Math.floor(chunk.byteLength / 2);
+  if (sampleCount <= 0) return 0;
+
+  let sumSq = 0;
+  for (let offset = 0; offset + 1 < chunk.byteLength; offset += 2) {
+    const sample = chunk.readInt16LE(offset) / 32768;
+    sumSq += sample * sample;
+  }
+
+  const rms = Math.sqrt(sumSq / sampleCount);
+  // Simple noise gate + gain to make UI feel responsive.
+  if (rms < 0.008) return 0;
+  return clamp(rms * 3.2, 0, 1);
+}
+
 function logSessionPerf(session: SttSession) {
   const durationMs = sessionAgeMs(session);
   const firstPartialMs = session.firstPartialAtMs ? session.firstPartialAtMs - session.startedAtMs : -1;
@@ -1585,6 +1602,8 @@ ipcMain.on('stt:audio', (_event, payload: { sessionId: string; pcm16kMonoInt16: 
   if (activeSession.ending) return;
 
   const chunk = Buffer.from(payload.pcm16kMonoInt16);
+  const level = computePcm16Level(chunk);
+  broadcast('hud:level', { sessionId: payload.sessionId, level });
   feedAudioChunk(activeSession, chunk);
 });
 

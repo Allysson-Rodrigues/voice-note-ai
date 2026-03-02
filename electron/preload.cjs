@@ -18,6 +18,11 @@ const api = {
     ipcRenderer.on('hud:state', listener);
     return () => ipcRenderer.off('hud:state', listener);
   },
+  onHudLevel: (cb) => {
+    const listener = (_event, payload) => cb(payload);
+    ipcRenderer.on('hud:level', listener);
+    return () => ipcRenderer.off('hud:level', listener);
+  },
   onCaptureStart: (cb) => {
     const listener = (_event, payload) => cb(payload);
     ipcRenderer.on('capture:start', listener);

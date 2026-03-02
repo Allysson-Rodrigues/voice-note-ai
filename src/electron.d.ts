@@ -63,6 +63,7 @@ declare global {
       setAutoPasteEnabled: (enabled: boolean) => Promise<{ ok: boolean }>;
       setToneMode: (mode: "formal" | "casual" | "very-casual") => Promise<{ ok: boolean; toneMode: "formal" | "casual" | "very-casual" }>;
       onHudState: (cb: (event: { state: "idle" | "listening" | "finalizing" | "injecting" | "success" | "error"; message?: string }) => void) => () => void;
+      onHudLevel: (cb: (event: { sessionId: string; level: number }) => void) => () => void;
       onCaptureStart: (cb: (payload: { sessionId: string; sttWarmStart?: boolean }) => void) => () => void;
       onCaptureStop: (cb: (payload: { sessionId: string }) => void) => () => void;
       onSttPartial: (cb: (event: { sessionId: string; text: string }) => void) => () => void;

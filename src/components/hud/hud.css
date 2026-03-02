@@ -89,10 +89,11 @@ body {
   background: rgba(255, 255, 255, 0.88);
   height: 6px;
   transform-origin: center;
+  transition: transform 60ms linear, opacity 120ms ease;
 }
 
-.hud-wave.active .hud-wave-bar {
-  animation: bar-wave 540ms ease-in-out infinite alternate;
+.hud-wave-bar {
+  opacity: 0.9;
 }
 
 .hud-text {
@@ -142,13 +143,4 @@ body {
   }
 }
 
-@keyframes bar-wave {
-  from {
-    transform: scaleY(0.45);
-    opacity: 0.45;
-  }
-  to {
-    transform: scaleY(1.15);
-    opacity: 0.98;
-  }
-}
+/* Waveform is driven by real audio level (IPC) instead of a looping keyframe animation. */

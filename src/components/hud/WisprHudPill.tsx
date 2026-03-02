@@ -7,6 +7,10 @@ type HudEvent = {
   message?: string;
 };
 
+type HudLevelEvent = {
+  level: number;
+};
+
 function renderMessage(state: HudState, partial: string, error: string | null) {
   if (state === "error") return error || "Erro ao transcrever";
   if (state === "success") return "Colado com sucesso";
@@ -31,8 +35,12 @@ export default function WisprHudPill() {
   const [error, setError] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
+  const [barLevels, setBarLevels] = useState<number[]>(() => Array.from({ length: 20 }, () => 0));
   const successTimerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
+  const targetLevelRef = useRef(0);
+  const smoothedLevelRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!window.voiceNoteAI) return;
@@ -45,6 +53,9 @@ export default function WisprHudPill() {
         setError(null);
         setDurationSec(0);
         startedAtRef.current = null;
+        targetLevelRef.current = 0;
+        smoothedLevelRef.current = 0;
+        setBarLevels(Array.from({ length: 20 }, () => 0));
         return;
       }
 
@@ -78,16 +89,63 @@ export default function WisprHudPill() {
       setError(payload.message);
     });
 
+    const offLevel = window.voiceNoteAI.onHudLevel((payload: HudLevelEvent) => {
+      // 0..1
+      targetLevelRef.current = Math.max(0, Math.min(1, Number(payload.level) || 0));
+    });
+
     return () => {
       offHud();
       offPartial();
       offFinal();
       offError();
+      offLevel();
       if (successTimerRef.current !== null) {
         window.clearTimeout(successTimerRef.current);
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (hudState !== "listening") {
+      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+      return;
+    }
+
+    const base = Array.from({ length: 20 }, (_v, index) => {
+      // Deterministic "shape" across bars: center slightly louder.
+      const x = index / 19;
+      const bell = 1 - Math.abs(x - 0.5) * 1.35;
+      return 0.45 + 0.55 * Math.max(0, Math.min(1, bell));
+    });
+
+    const tick = () => {
+      const target = targetLevelRef.current;
+      const prev = smoothedLevelRef.current;
+
+      // Fast attack, slower release for a natural VU feel.
+      const next = target > prev ? prev + (target - prev) * 0.55 : prev + (target - prev) * 0.18;
+      smoothedLevelRef.current = next;
+
+      const t = performance.now() / 1000;
+      const levels = base.map((shape, index) => {
+        const phase = t * 8 + index * 0.35;
+        const wobble = 0.12 * Math.sin(phase) + 0.06 * Math.sin(phase * 0.6);
+        const value = next * shape + wobble * next;
+        return Math.max(0, Math.min(1, value));
+      });
+
+      setBarLevels(levels);
+      rafRef.current = window.requestAnimationFrame(tick);
+    };
+
+    rafRef.current = window.requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    };
+  }, [hudState]);
 
   useEffect(() => {
     if (hudState !== "listening") return;
@@ -108,14 +166,13 @@ export default function WisprHudPill() {
         <span className={`hud-dot ${hudState === "listening" ? "listening" : ""}`} />
 
         {hudState === "listening" ? (
-          <div className={`hud-wave ${hudState === "listening" ? "active" : ""}`} aria-hidden>
+          <div className="hud-wave" aria-hidden>
             {waveBars.map((_, index) => (
               <span
                 key={index}
                 className="hud-wave-bar"
                 style={{
-                  animationDelay: `${(index % 5) * 70}ms`,
-                  height: `${4 + (index % 4) * 2}px`,
+                  transform: `scaleY(${0.25 + barLevels[index] * 1.25})`,
                 }}
               />
             ))}
