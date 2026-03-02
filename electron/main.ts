@@ -164,6 +164,55 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+function withTrailingSlash(url: string) {
+  return url.endsWith('/') ? url : `${url}/`;
+}
+
+function swapLocalhost(url: string) {
+  if (url.includes('://localhost')) return url.replace('://localhost', '://127.0.0.1');
+  if (url.includes('://127.0.0.1')) return url.replace('://127.0.0.1', '://localhost');
+  return null;
+}
+
+async function loadUrlWithRetry(
+  win: BrowserWindow,
+  url: string,
+  opts: { label: string; attempts?: number; delayMs?: number } = { label: 'window' },
+) {
+  const attempts = Math.max(1, opts.attempts ?? 14); // ~7s default with 500ms delay
+  const delayMs = Math.max(80, opts.delayMs ?? 500);
+
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (win.isDestroyed()) throw new Error(`${opts.label} destroyed before load`);
+
+    try {
+      await win.loadURL(url);
+      return;
+    } catch (error) {
+      lastError = error;
+      // Give Chromium network service a moment to restart on Windows.
+      await sleep(delayMs);
+    }
+  }
+
+  const swapped = swapLocalhost(url);
+  if (swapped) {
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      if (win.isDestroyed()) throw new Error(`${opts.label} destroyed before load`);
+      try {
+        await win.loadURL(swapped);
+        return;
+      } catch (error) {
+        lastError = error;
+        await sleep(delayMs);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`Failed to load ${opts.label}`);
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -331,7 +380,7 @@ async function createMainWindow() {
   });
 
   if (DEV_SERVER_URL) {
-    await mainWindow.loadURL(DEV_SERVER_URL);
+    await loadUrlWithRetry(mainWindow, withTrailingSlash(DEV_SERVER_URL), { label: 'main window' });
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
     await mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
@@ -376,7 +425,8 @@ async function createHudWindow() {
   });
 
   if (DEV_SERVER_URL) {
-    await hudWindow.loadURL(`${DEV_SERVER_URL}/hud.html`);
+    const base = withTrailingSlash(DEV_SERVER_URL);
+    await loadUrlWithRetry(hudWindow, `${base}hud.html`, { label: 'hud window' });
   } else {
     await hudWindow.loadFile(path.join(__dirname, '..', 'dist', 'hud.html'));
   }
@@ -1621,7 +1671,9 @@ ipcMain.handle('stt:stop', async (_event, payload: { sessionId: string }) => {
   return { ok: true, text: finalText };
 });
 
-app.whenReady().then(async () => {
+app
+  .whenReady()
+  .then(async () => {
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.antigravity.voice-note-ai');
   }
@@ -1670,7 +1722,16 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createMainWindow();
   });
-});
+  })
+  .catch((error) => {
+    console.error('[startup] failed to initialize', error);
+    try {
+      setHudState({ state: 'error', message: 'Falha ao iniciar app (dev server).' });
+    } catch {
+      // ignore
+    }
+    app.quit();
+  });
 
 app.on('window-all-closed', () => {
   // Keep running in background (tray + hotkeys) instead of quitting.
