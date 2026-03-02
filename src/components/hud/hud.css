@@ -83,6 +83,11 @@ body {
   height: 16px;
 }
 
+.hud-spacer {
+  flex: 1;
+  min-width: 12px;
+}
+
 .hud-wave-bar {
   width: 2px;
   border-radius: 2px;

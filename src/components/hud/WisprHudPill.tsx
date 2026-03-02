@@ -11,28 +11,16 @@ type HudLevelEvent = {
   level: number;
 };
 
-function renderMessage(state: HudState, partial: string, error: string | null) {
-  if (state === "error") return error || "Erro ao transcrever";
-  if (state === "success") return "Colado com sucesso";
-  if (state === "injecting") return "Colando...";
-  if (state === "finalizing") return "Transcrevendo...";
-  if (partial) return partial;
-  return "Ouvindo...";
-}
-
-function clampWords(value: string, maxWords: number) {
-  const words = value
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
-  if (words.length <= maxWords) return words.join(" ");
-  return `${words.slice(0, maxWords).join(" ")} ...`;
+function resolveStatusMessage(state: HudState, message?: string, error?: string | null) {
+  if (state === "error") return message || error || "Erro ao transcrever";
+  if (state === "success") return message || "Concluido";
+  return "";
 }
 
 export default function WisprHudPill() {
   const [hudState, setHudState] = useState<HudState>("idle");
-  const [partial, setPartial] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [visible, setVisible] = useState(false);
   const [durationSec, setDurationSec] = useState(0);
   const [barLevels, setBarLevels] = useState<number[]>(() => Array.from({ length: 20 }, () => 0));
@@ -49,8 +37,8 @@ export default function WisprHudPill() {
       setHudState(payload.state);
       if (payload.state === "idle") {
         setVisible(false);
-        setPartial("");
         setError(null);
+        setSuccessMessage(null);
         setDurationSec(0);
         startedAtRef.current = null;
         targetLevelRef.current = 0;
@@ -63,11 +51,13 @@ export default function WisprHudPill() {
       if (payload.state === "listening") {
         startedAtRef.current = Date.now();
         setError(null);
+        setSuccessMessage(null);
       }
       if (payload.state === "error") {
         setError(payload.message ?? "Erro ao transcrever");
       }
       if (payload.state === "success") {
+        setSuccessMessage(payload.message ?? null);
         if (successTimerRef.current !== null) window.clearTimeout(successTimerRef.current);
         successTimerRef.current = window.setTimeout(() => {
           setVisible(false);
@@ -75,12 +65,7 @@ export default function WisprHudPill() {
       }
     });
 
-    const offPartial = window.voiceNoteAI.onSttPartial((payload) => {
-      setPartial(payload.text);
-    });
-
     const offFinal = window.voiceNoteAI.onSttFinal(() => {
-      setPartial("");
       setHudState("injecting");
     });
 
@@ -96,7 +81,6 @@ export default function WisprHudPill() {
 
     return () => {
       offHud();
-      offPartial();
       offFinal();
       offError();
       offLevel();
@@ -156,8 +140,8 @@ export default function WisprHudPill() {
     return () => window.clearInterval(timer);
   }, [hudState]);
 
-  const rawText = renderMessage(hudState, partial, error);
-  const text = hudState === "listening" && partial ? clampWords(rawText, 3) : rawText;
+  const shouldShowText = hudState === "success" || hudState === "error";
+  const text = shouldShowText ? resolveStatusMessage(hudState, successMessage ?? undefined, error) : "";
   const waveBars = useMemo(() => Array.from({ length: 20 }), []);
 
   return (
@@ -179,13 +163,13 @@ export default function WisprHudPill() {
           </div>
         ) : null}
 
-        <div
-          className={`hud-text ${
-            hudState === "error" ? "error" : hudState === "success" ? "success" : partial ? "partial" : ""
-          }`}
-        >
-          {text}
-        </div>
+        {hudState === "listening" ? <div className="hud-spacer" aria-hidden /> : null}
+
+        {shouldShowText ? (
+          <div className={`hud-text ${hudState === "error" ? "error" : hudState === "success" ? "success" : ""}`}>
+            {text}
+          </div>
+        ) : null}
 
         {hudState === "listening" ? (
           <>
