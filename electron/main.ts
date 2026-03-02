@@ -93,6 +93,13 @@ type InjectResult = {
   skippedReason?: 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
 };
 
+type ClipboardSnapshot = {
+  text: string;
+  html: string;
+  rtf: string;
+  image: Electron.NativeImage | null;
+};
+
 let mainWindow: BrowserWindow | null = null;
 let hudWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -133,6 +140,7 @@ let cachedSpeechSDK: any | null = null;
 let phraseCache: string[] | null = null;
 let phraseCacheDirty = true;
 let injectionQueue: Promise<void> = Promise.resolve();
+const pendingSttStartBySession = new Map<string, Promise<{ ok: boolean }>>();
 
 const pendingTargetWindowBySession = new Map<string, string | null>();
 
@@ -455,7 +463,19 @@ function registerToggleHotkey() {
     const sessionId = randomUUID();
     cancelPendingStop();
     void primeTargetWindowForSession(sessionId);
-    mainWindow.webContents.send('capture:start', { sessionId });
+    void startSttSession(mainWindow.webContents, { sessionId })
+      .then(() => undefined)
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        broadcast('stt:error', { sessionId, message });
+        setHudState({ state: 'error', message });
+        emitAppError(message);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('capture:stop', { sessionId });
+        }
+      });
+
+    mainWindow.webContents.send('capture:start', { sessionId, sttWarmStart: true });
     setHudState({ state: 'listening' });
   };
 
@@ -562,7 +582,19 @@ async function tryStartHoldToTalkHook() {
       const sessionId = randomUUID();
       cancelPendingStop();
       void primeTargetWindowForSession(sessionId);
-      mainWindow.webContents.send('capture:start', { sessionId });
+      void startSttSession(mainWindow.webContents, { sessionId })
+        .then(() => undefined)
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          broadcast('stt:error', { sessionId, message });
+          setHudState({ state: 'error', message });
+          emitAppError(message);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('capture:stop', { sessionId });
+          }
+        });
+
+      mainWindow.webContents.send('capture:start', { sessionId, sttWarmStart: true });
       setHudState({ state: 'listening' });
       return;
     }
@@ -845,6 +877,53 @@ function withClipboardLock<T>(task: () => Promise<T>): Promise<T> {
   return pending;
 }
 
+function snapshotClipboard(): ClipboardSnapshot {
+  let image: Electron.NativeImage | null = null;
+  try {
+    const candidate = clipboard.readImage();
+    if (candidate && !candidate.isEmpty()) image = candidate;
+  } catch {
+    image = null;
+  }
+
+  let text = '';
+  let html = '';
+  let rtf = '';
+  try {
+    text = clipboard.readText();
+  } catch {
+    text = '';
+  }
+  try {
+    html = clipboard.readHTML();
+  } catch {
+    html = '';
+  }
+  try {
+    rtf = clipboard.readRTF();
+  } catch {
+    rtf = '';
+  }
+
+  return { text, html, rtf, image };
+}
+
+function restoreClipboard(snapshot: ClipboardSnapshot) {
+  const payload: Electron.Data = {};
+  if (snapshot.text) payload.text = snapshot.text;
+  if (snapshot.html) payload.html = snapshot.html;
+  if (snapshot.rtf) payload.rtf = snapshot.rtf;
+  if (snapshot.image && !snapshot.image.isEmpty()) payload.image = snapshot.image;
+
+  // If nothing is present, clear as a best-effort restore.
+  if (Object.keys(payload).length === 0) {
+    clipboard.clear();
+    return;
+  }
+
+  clipboard.write(payload);
+}
+
 async function ensureTargetWindow(targetWindowHandle: string | null) {
   if (process.platform !== 'win32') return true;
   if (!targetWindowHandle) return true;
@@ -864,7 +943,7 @@ async function injectText(text: string, targetWindowHandle: string | null): Prom
   return withClipboardLock(() =>
     withTimeout(
       (async () => {
-        const previous = clipboard.readText();
+        const previous = snapshotClipboard();
         clipboard.writeText(normalized);
 
         if (!canAutoPaste()) {
@@ -888,7 +967,7 @@ async function injectText(text: string, targetWindowHandle: string | null): Prom
             (async () => {
               await sleep(110);
               if (clipboard.readText() === normalized) {
-                clipboard.writeText(previous);
+                restoreClipboard(previous);
                 restored = true;
               }
             })(),
@@ -1294,6 +1373,85 @@ function pickSessionLanguages(payloadLanguage?: string) {
   return [payloadLanguage ?? (process.env.AZURE_SPEECH_LANGUAGE ?? 'pt-BR')];
 }
 
+async function startSttSession(
+  sender: Electron.WebContents,
+  payload: { sessionId: string; language?: string },
+): Promise<{ ok: boolean }> {
+  if (activeSession) {
+    if (activeSession.sessionId === payload.sessionId) return { ok: true };
+    throw new Error('A session is already active.');
+  }
+
+  const existing = pendingSttStartBySession.get(payload.sessionId);
+  if (existing) return await existing;
+  if (pendingSttStartBySession.size > 0) {
+    throw new Error('A session is already active.');
+  }
+
+  const started = (async () => {
+    let session: SttSession | null = null;
+
+    try {
+      const SpeechSDK = await getSpeechSdk();
+      const { key, region, language: defaultLanguage } = getAzureConfig();
+      const language = payload.language ?? defaultLanguage;
+      const phrases = await getActivePhrasesCached();
+      const languages = pickSessionLanguages(language);
+
+      const targetWindowHandle =
+        pendingTargetWindowBySession.get(payload.sessionId) ?? (await getForegroundWindowHandle());
+      pendingTargetWindowBySession.delete(payload.sessionId);
+
+      session = {
+        sessionId: payload.sessionId,
+        sender,
+        languages,
+        slots: [],
+        startedAtMs: Date.now(),
+        sttStartAtMs: Date.now(),
+        sttReadyAtMs: null,
+        firstPartialAtMs: null,
+        finalAtMs: null,
+        injectAtMs: null,
+        retryCount: 0,
+        ending: false,
+        targetWindowHandle,
+        audioRing: [],
+        audioRingBytes: 0,
+        timeoutTimer: null,
+      };
+
+      session.slots = languages.map((entry) => createRecognizerSlot(SpeechSDK, entry, key, region, phrases));
+      for (const slot of session.slots) {
+        attachSlotHandlers(session, slot, slot === session.slots[0]);
+      }
+
+      activeSession = session;
+      scheduleSessionTimeout(session);
+      setHudState({ state: 'listening' });
+
+      await startSlots(session);
+      return { ok: true };
+    } catch (error) {
+      if (session) {
+        session.ending = true;
+        clearSessionTimeout(session);
+        cancelPendingStop();
+        await closeAllSlots(session).catch(() => undefined);
+        if (activeSession && activeSession.sessionId === session.sessionId) activeSession = null;
+      }
+      throw error;
+    }
+  })();
+
+  pendingSttStartBySession.set(payload.sessionId, started);
+  try {
+    return await started;
+  } finally {
+    pendingSttStartBySession.delete(payload.sessionId);
+  }
+}
+
 ipcMain.handle('settings:get', async () => {
   return {
     ...settings,
@@ -1369,50 +1527,7 @@ ipcMain.handle('dictionary:remove', async (_event, payload: { id: string }) => {
 });
 
 ipcMain.handle('stt:start', async (event, payload: { sessionId: string; language?: string }) => {
-  if (activeSession) {
-    throw new Error('A session is already active.');
-  }
-
-  const SpeechSDK = await getSpeechSdk();
-  const { key, region, language: defaultLanguage } = getAzureConfig();
-  const language = payload.language ?? defaultLanguage;
-  const phrases = await getActivePhrasesCached();
-  const languages = pickSessionLanguages(language);
-
-  const targetWindowHandle = pendingTargetWindowBySession.get(payload.sessionId) ?? (await getForegroundWindowHandle());
-  pendingTargetWindowBySession.delete(payload.sessionId);
-
-  const session: SttSession = {
-    sessionId: payload.sessionId,
-    sender: event.sender,
-    languages,
-    slots: [],
-    startedAtMs: Date.now(),
-    sttStartAtMs: Date.now(),
-    sttReadyAtMs: null,
-    firstPartialAtMs: null,
-    finalAtMs: null,
-    injectAtMs: null,
-    retryCount: 0,
-    ending: false,
-    targetWindowHandle,
-    audioRing: [],
-    audioRingBytes: 0,
-    timeoutTimer: null,
-  };
-
-  session.slots = languages.map((entry) => createRecognizerSlot(SpeechSDK, entry, key, region, phrases));
-  for (const slot of session.slots) {
-    attachSlotHandlers(session, slot, slot === session.slots[0]);
-  }
-
-  activeSession = session;
-  scheduleSessionTimeout(session);
-  setHudState({ state: 'listening' });
-
-  await startSlots(session);
-
-  return { ok: true };
+  return await startSttSession(event.sender, payload);
 });
 
 ipcMain.on('stt:audio', (_event, payload: { sessionId: string; pcm16kMonoInt16: ArrayBuffer }) => {
