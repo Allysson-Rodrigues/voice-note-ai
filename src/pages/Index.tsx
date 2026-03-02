@@ -93,6 +93,7 @@ const Index = () => {
 
   const canControl = useMemo(() => hasDesktopApi && !runtimeInfo.captureBlockedReason, [hasDesktopApi, runtimeInfo.captureBlockedReason]);
   const hotkeyLabel = runtimeInfo.hotkeyLabel || DEFAULT_RUNTIME_INFO.hotkeyLabel;
+  const effectiveHotkeyLabel = runtimeInfo.holdRequired ? "Ctrl+Win" : hotkeyLabel;
 
   const setStatusSafely = useCallback((next: Status) => {
     setStatus((prev) => (prev === next ? prev : next));
@@ -181,28 +182,24 @@ const Index = () => {
     setSessionId(newSessionId);
     setStatusSafely("listening");
 
-    try {
-      const sttStart = window.voiceNoteAI.startStt({ sessionId: newSessionId });
-      const captureStart = startCapture(newSessionId, micDeviceId || null, micInputGain);
-      const [sttResult, captureResult] = await Promise.allSettled([sttStart, captureStart]);
+    const sttStart = window.voiceNoteAI.startStt({ sessionId: newSessionId });
+    const captureStart = startCapture(newSessionId, micDeviceId || null, micInputGain);
+    const [sttResult, captureResult] = await Promise.allSettled([sttStart, captureStart]);
 
-      if (sttResult.status === "rejected" || captureResult.status === "rejected") {
-        if (sttResult.status === "fulfilled") {
-          try {
-            await window.voiceNoteAI.stopStt(newSessionId);
-          } catch {
-            // ignore rollback failure
-          }
-        }
+    if (sttResult.status === "rejected" || captureResult.status === "rejected") {
+      if (sttResult.status === "fulfilled") {
         try {
-          await stopCapture();
+          await window.voiceNoteAI.stopStt(newSessionId);
         } catch {
           // ignore rollback failure
         }
-        throw sttResult.status === "rejected" ? sttResult.reason : captureResult.reason;
       }
-    } catch (e) {
-      throw e;
+      try {
+        await stopCapture();
+      } catch {
+        // ignore rollback failure
+      }
+      throw sttResult.status === "rejected" ? sttResult.reason : captureResult.reason;
     }
   }, [micDeviceId, micInputGain, setStatusSafely]);
 
@@ -622,32 +619,33 @@ const Index = () => {
                     </div>
                   ) : null}
 
-                  <div className="mb-5 rounded-3xl border border-border/70 bg-card/65 px-6 py-6 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
-                    <div className="text-[clamp(1.6rem,3.4vw,2.15rem)] font-semibold text-foreground">
-                      Dite em qualquer app, sem atrito
-                    </div>
-                    <div className="mt-2 max-w-3xl text-sm text-foreground/70">
-                      Aperte <span className="font-mono">{hotkeyLabel}</span>, fale naturalmente e solte para finalizar.
-                      O HUD confirma o estado e a sessão cola no app alvo capturado no início.
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <Button
-                        className="rounded-2xl bg-primary px-5 text-primary-foreground hover:bg-primary/90"
-                        onClick={() => setActiveTab("capture")}
-                      >
-                        Testar agora
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="rounded-2xl border-border/70 bg-muted/20 px-5"
-                        onClick={() => setActiveTab("settings")}
-                      >
-                        Configurações
-                      </Button>
-                    </div>
-                  </div>
-
                   <TabsContent value="capture" className="mt-3 space-y-3 pb-1 pr-1">
+                    <div className="mb-5 rounded-3xl border border-border/70 bg-card/65 px-6 py-6 shadow-[0_20px_60px_rgba(0,0,0,0.45)]">
+                      <div className="text-[clamp(1.6rem,3.4vw,2.15rem)] font-semibold text-foreground">
+                        Dite em qualquer app, sem atrito
+                      </div>
+                      <div className="mt-2 max-w-3xl text-sm text-foreground/70">
+                        Aperte <span className="font-mono">{effectiveHotkeyLabel}</span>, fale naturalmente e solte para finalizar.
+                        O HUD confirma o estado e a sessão cola no app alvo capturado no início.
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        <Button
+                          className="rounded-2xl bg-primary px-5 text-primary-foreground hover:bg-primary/90"
+                          onClick={() => void onManualStart()}
+                          disabled={!canControl || status !== "idle"}
+                        >
+                          Testar agora
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="rounded-2xl border-border/70 bg-muted/20 px-5"
+                          onClick={() => setActiveTab("settings")}
+                        >
+                          Configurações
+                        </Button>
+                      </div>
+                    </div>
+
                     <div className="grid gap-3 lg:grid-cols-2">
                       <Card className="soft-panel">
                         <CardHeader className="pb-3">
@@ -929,7 +927,7 @@ const Index = () => {
                           <div className="text-xs text-muted-foreground">Atual: {micInputGain.toFixed(2)}x</div>
                         </div>
                         <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
-                          Hotkey atual: <span className="font-mono">{hotkeyLabel}</span>{" "}
+                          Hotkey atual: <span className="font-mono">{effectiveHotkeyLabel}</span>{" "}
                           <span className="text-muted-foreground">({HOTKEY_MODE_LABEL[runtimeInfo.hotkeyMode]})</span>
                         </div>
                         <div className="flex items-center justify-between rounded-md border border-border/70 bg-muted/20 px-3 py-2">
