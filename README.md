@@ -1,73 +1,132 @@
-# Welcome to your Lovable project
+# Voice Note AI (Windows-first, uso pessoal)
 
-## Project info
+Ditado universal (Electron) com hotkey global que:
+- inicia/para a captura do microfone
+- streama PCM 16kHz mono para o Azure Speech-to-Text
+- copia o texto final para o clipboard
+- no Windows, tenta colar automaticamente via `Ctrl+V` (PowerShell SendKeys)
+- mostra HUD em janela dedicada (`hud.html`) transparente e always-on-top
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Setup
 
-## How can I edit this code?
+1) Crie um arquivo `.env.local` (use `.env.example` como base)
 
-There are several ways of editing your application.
+2) Instale deps e rode:
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```bash
+npm install
+npm run dev:desktop
 ```
 
-**Edit a file directly in GitHub**
+## Hotkey / comportamento
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+- Hotkey default: `Ctrl+Win` (`CommandOrControl+Super`)
+- Em plataformas não-Windows, existe fallback para `Ctrl+Win+Space` (`CommandOrControl+Super+Space`) se a primária falhar
+- Para customizar:
+  - `VOICE_HOTKEY="CommandOrControl+Super"`
+  - `VOICE_HOTKEY_FALLBACK="CommandOrControl+Super+Space"`
+- Hold-to-talk (segurar/soltar):
+  - default ligado (`VOICE_HOLD_TO_TALK=1`) no Windows com `uiohook-napi`
+  - no Windows, se o hook não carregar, a captura fica bloqueada (sem fallback toggle)
+  - default usa modificadores (`Ctrl + Win`) sem keycode fixo
+  - se precisar forçar keycodes, use `VOICE_HOLD_KEYCODES` (ex: `29,3675`)
+- Auto-paste (Windows):
+  - padrão recomendado: ligado (`VOICE_AUTO_PASTE=1`)
+  - o fluxo usa mutex e restauração segura de clipboard (não sobrescreve cópia nova do usuário)
 
-**Use GitHub Codespaces**
+## Estilo de texto e correções inteligentes
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+- Perfis de escrita:
+  - `formal`: pontuação e normalização mais forte
+  - `casual`: equilíbrio entre naturalidade e legibilidade
+  - `very-casual`: mantém tom coloquial e reduz formalização
+- O app aplica correções canônicas pós-STT (ex.: `workspace -> Workspace`, `antigravity -> Antigravity`).
+- Você pode ajustar essas regras no tab **Dicionário > Correções inteligentes**.
 
-## What technologies are used for this project?
+## Troubleshooting de hotkey (Windows)
 
-This project is built with:
+- Se a hotkey não registrar, o app mostra erro com o motivo atual.
+- Se `uiohook-napi` falhar no Windows, o app mostra erro e bloqueia captura até corrigir o hook.
+- Execute o app como administrador para testar conflito de privilégio.
+- Verifique atalhos globais já ocupando `Ctrl+Win`.
+- Ative `VOICE_HOLD_KEYCODES` apenas se o layout/teclado não responder bem com detecção por modificadores.
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Latência e confiabilidade
 
-## How can I deploy this project?
+- O app mantém perfil de latência equilibrado (`stopGraceMs=200`).
+- Timeout de sessão: `90s` (configurável em settings store).
+- Retry automático STT: 1 tentativa para falhas recuperáveis em sessões curtas (<30s), com replay de buffer local.
+- Telemetria no log:
+  - `ptt_to_first_partial_ms`
+  - `ptt_to_final_ms`
+  - `inject_total_ms`
+  - `retry_count`
+  - `session_duration_ms`
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+## Comandos de formatação (PT+EN)
 
-## Can I connect a custom domain to my Lovable project?
+- O pós-processamento entende comandos explícitos:
+  - `bullet point` / `bullet` / `tópico` / `topico` -> `•`
+  - `item 1` / `número 1` / `numero 1` / `number 1` -> `1.`
+  - `nova linha` / `new line` -> quebra de linha
+- A opção pode ser ligada/desligada em **Configurações**.
 
-Yes, you can!
+## Ícone do app
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+- Fonte do ícone: `assets/icons/app-icon.svg`
+- Geração de ícones:
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+```bash
+npm run icons:generate
+```
+
+- Saída:
+  - `public/favicon.png`
+  - `public/favicon.ico`
+
+## Atualizar do WSL para Windows
+
+No WSL:
+
+```bash
+cd /home/allysson/projetos/01-projetos/voice-note-ai
+rsync -a --delete \
+  --exclude .git \
+  --exclude node_modules \
+  --exclude dist \
+  --exclude electron-dist \
+  --exclude .env.local \
+  ./ /mnt/c/Users/allys/dev/voice-note-ai/
+```
+
+No Windows (PowerShell ou CMD):
+
+```bash
+cd C:\Users\allys\dev\voice-note-ai
+npm install
+npm run dev:desktop
+```
+
+Checklist pós-sync:
+- hotkey `Ctrl+Win` entra em `Listening` e ao soltar vai para `Finalizing` -> `Idle`
+- em Windows, o hook global carrega sem bloquear captura
+- HUD permanece acima dos apps
+- ditado funciona em Notepad/Slack/VS Code
+
+## “Vai parecer hack?”
+
+- Em apps comuns (Notepad, Slack, Chrome) normalmente funciona sem drama.
+- Dois pontos podem chamar atenção:
+  1) **Hook global de teclado** (parece “keylogger” para alguns antivírus, embora aqui a gente só use para detectar o chord e iniciar/parar a gravação).
+  2) **Auto-paste** (simulação de `Ctrl+V`) pode falhar em apps/janelas “protegidas” ou com políticas restritas.
+- Por isso o MVP mantém fallback seguro: **sempre copia pro clipboard**; auto-paste é opcional.
+
+## Azure Speech (env vars)
+
+- `AZURE_SPEECH_KEY`
+- `AZURE_SPEECH_REGION`
+- opcional: `AZURE_SPEECH_LANGUAGE` (default: `pt-BR`)
+- opcional: `VOICE_PHRASES` (lista separada por vírgula com gírias/termos em inglês/nome de apps)
+- `VOICE_HUD` (default: `1`) mostra um indicador always-on-top no canto inferior direito (perto da taskbar)
+- `VOICE_HUD_DEBUG=1` transforma o HUD em janela normal (com frame/devtools) para debug se algo não aparecer
+- `VOICE_MAX_SESSION_SECONDS` (default: `90`)
