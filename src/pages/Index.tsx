@@ -174,7 +174,7 @@ const Index = () => {
     }
   }, [hasDesktopApi, setStatusSafely]);
 
-  const begin = useCallback(async (newSessionId: string) => {
+  const begin = useCallback(async (newSessionId: string, options?: { sttWarmStart?: boolean }) => {
     setError(null);
     setFinalText("");
     setPartial("");
@@ -182,6 +182,7 @@ const Index = () => {
     setSessionId(newSessionId);
     setStatusSafely("listening");
 
+    void options;
     const sttStart = window.voiceNoteAI.startStt({ sessionId: newSessionId });
     const captureStart = startCapture(newSessionId, micDeviceId || null, micInputGain);
     const [sttResult, captureResult] = await Promise.allSettled([sttStart, captureStart]);
@@ -244,9 +245,9 @@ const Index = () => {
     void loadRuntimeInfo();
     void loadDictionary();
 
-    const offStart = window.voiceNoteAI.onCaptureStart(async ({ sessionId }) => {
+    const offStart = window.voiceNoteAI.onCaptureStart(async ({ sessionId, sttWarmStart }) => {
       try {
-        await begin(sessionId);
+        await begin(sessionId, { sttWarmStart });
       } catch (e) {
         setStatusSafely("error");
         setError(e instanceof Error ? e.message : String(e));
@@ -872,6 +873,22 @@ const Index = () => {
                   </TabsContent>
 
                   <TabsContent value="settings" className="mt-3 space-y-3 pb-1 pr-1">
+                    <Card className="soft-panel">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base">Privacidade</CardTitle>
+                        <CardDescription>Transcricao por Azure Speech-to-Text (nuvem).</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-2 text-sm text-muted-foreground">
+                        <p>
+                          Ao ditar, o audio e enviado ao provedor de STT configurado (Azure) para gerar a transcricao.
+                        </p>
+                        <p>
+                          Evite ditar dados sensiveis (senhas, dados bancarios, documentos). Para uso como produto, o ideal
+                          e mover a autenticacao/credenciais para um backend e nao embutir chaves no app.
+                        </p>
+                      </CardContent>
+                    </Card>
+
                     <Card className="soft-panel">
                       <CardHeader className="pb-3">
                         <CardTitle className="text-base">Captura e dispositivo</CardTitle>
