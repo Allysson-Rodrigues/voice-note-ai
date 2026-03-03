@@ -8,7 +8,7 @@ Ditado universal (Electron) com hotkey global que:
 - no Windows, tenta colar automaticamente via `WM_PASTE` (handle alvo/foreground) com fallback `Ctrl+V` e `Shift+Insert`
 - mostra HUD em janela dedicada (`hud.html`) transparente e always-on-top
 
-## Setup
+## Setup (dev)
 
 1. Crie um arquivo `.env.local` (use `.env.example` como base)
 
@@ -18,6 +18,20 @@ Ditado universal (Electron) com hotkey global que:
 npm ci --workspaces=false
 npm run dev:desktop
 ```
+
+## Configuração Azure no app instalado (.exe)
+
+Para o app já instalado no Windows, configure as variáveis no sistema (não apenas no `.env.local`):
+
+1. Abra **Editar as variáveis de ambiente do sistema**.
+2. Em **Variáveis de usuário**, adicione/edite:
+   - `AZURE_SPEECH_KEY`
+   - `AZURE_SPEECH_REGION` (ex.: `brazilsouth`)
+   - opcional: `AZURE_SPEECH_LANGUAGE=pt-BR`
+3. Feche o app pela bandeja (**Quit**) e faça logoff/login (ou reinicie o Windows Explorer).
+4. Reabra o app e rode **Health Check**.
+
+Observação: no `.exe` empacotado, o `.env.local` não é a fonte mais confiável para variáveis de runtime do usuário final.
 
 ## Quality Gate (clean code)
 
@@ -48,6 +62,14 @@ npm run build:desktop
 npm run dist:win
 ```
 
+Importante:
+
+- Rode os comandos na pasta do projeto (onde existe `package.json`), por exemplo:
+
+```powershell
+cd C:\Users\allys\dev\voice-note-ai
+```
+
 Saída esperada (pasta `release/`):
 
 - `Voice Note AI-Setup-1.0.0.exe`
@@ -57,6 +79,11 @@ Observações:
 
 - O instalador usa upgrade in-place (mesmo `appId`/`productName`).
 - Sem assinatura de código, o Windows SmartScreen pode exibir alerta. Para distribuição ampla, use code signing.
+- Para abrir o instalador no PowerShell, use caminho entre aspas por causa de espaços no nome:
+
+```powershell
+& ".\release\Voice Note AI-Setup-1.0.0.exe"
+```
 
 ## Atualização de versão (patch/minor/major)
 
@@ -111,6 +138,12 @@ Notas de update:
 - Execute o app como administrador para testar conflito de privilégio.
 - Verifique atalhos globais já ocupando `Ctrl+Win`.
 - Ative `VOICE_HOLD_KEYCODES` apenas se o layout/teclado não responder bem com detecção por modificadores.
+
+## Troubleshooting de build/instalação (Windows)
+
+- `npm ERR! enoent ... package.json`: você está em pasta errada; rode `cd` para o diretório do projeto.
+- `release\Voice ... could not be loaded`: no PowerShell, use `&` + caminho entre aspas para executar o `.exe`.
+- `Falha na captura: Unable to load a worklet's module.`: gere instalador atualizado (`npm run build:desktop && npm run dist:win`) e reinstale por cima.
 
 ## Latência e confiabilidade
 
