@@ -5,11 +5,17 @@ const api = {
   addDictionaryTerm: (payload) => ipcRenderer.invoke('dictionary:add', payload),
   updateDictionaryTerm: (payload) => ipcRenderer.invoke('dictionary:update', payload),
   removeDictionaryTerm: (id) => ipcRenderer.invoke('dictionary:remove', { id }),
+  listHistory: (params) => ipcRenderer.invoke('history:list', params ?? {}),
+  removeHistoryEntry: (id) => ipcRenderer.invoke('history:remove', { id }),
+  clearHistory: (params) => ipcRenderer.invoke('history:clear', params ?? {}),
   startStt: (payload) => ipcRenderer.invoke('stt:start', payload),
-  sendAudio: (sessionId, pcm16kMonoInt16) => ipcRenderer.send('stt:audio', { sessionId, pcm16kMonoInt16 }),
+  sendAudio: (sessionId, pcm16kMonoInt16) =>
+    ipcRenderer.send('stt:audio', { sessionId, pcm16kMonoInt16 }),
   stopStt: (sessionId) => ipcRenderer.invoke('stt:stop', { sessionId }),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getRuntimeInfo: () => ipcRenderer.invoke('app:runtime-info'),
+  getHealthCheck: () => ipcRenderer.invoke('app:health-check'),
+  retryHoldHook: () => ipcRenderer.invoke('app:retry-hold-hook'),
   updateSettings: (partial) => ipcRenderer.invoke('settings:update', partial),
   setAutoPasteEnabled: (enabled) => ipcRenderer.invoke('settings:autoPaste', { enabled }),
   setToneMode: (mode) => ipcRenderer.invoke('settings:tone', { mode }),
@@ -22,6 +28,11 @@ const api = {
     const listener = (_event, payload) => cb(payload);
     ipcRenderer.on('hud:level', listener);
     return () => ipcRenderer.off('hud:level', listener);
+  },
+  onHudHover: (cb) => {
+    const listener = (_event, payload) => cb(payload);
+    ipcRenderer.on('hud:hover', listener);
+    return () => ipcRenderer.off('hud:hover', listener);
   },
   onCaptureStart: (cb) => {
     const listener = (_event, payload) => cb(payload);

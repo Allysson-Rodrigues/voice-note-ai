@@ -1,22 +1,82 @@
 # Voice Note AI (Windows-first, uso pessoal)
 
 Ditado universal (Electron) com hotkey global que:
+
 - inicia/para a captura do microfone
 - streama PCM 16kHz mono para o Azure Speech-to-Text
 - copia o texto final para o clipboard
-- no Windows, tenta colar automaticamente via `Ctrl+V` (PowerShell SendKeys)
+- no Windows, tenta colar automaticamente via `WM_PASTE` (handle alvo/foreground) com fallback `Ctrl+V` e `Shift+Insert`
 - mostra HUD em janela dedicada (`hud.html`) transparente e always-on-top
 
 ## Setup
 
-1) Crie um arquivo `.env.local` (use `.env.example` como base)
+1. Crie um arquivo `.env.local` (use `.env.example` como base)
 
-2) Instale deps e rode:
+2. Instale deps e rode:
 
 ```bash
-npm install
+npm ci --workspaces=false
 npm run dev:desktop
 ```
+
+## Quality Gate (clean code)
+
+```bash
+# gate recomendado para CI/local (lint + typecheck + coverage + ciclos + arquivos órfãos)
+npm run quality
+
+# versão estrita (inclui prettier no repo inteiro)
+npm run quality:strict
+```
+
+## Empacotar instalador Windows (.exe)
+
+Pré-requisitos:
+
+- Rodar o empacotamento no **Windows** (PowerShell/CMD), não no Linux puro.
+- Node.js + npm instalados.
+- Dependências instaladas (`npm ci --workspaces=false`).
+- Variáveis Azure configuradas no ambiente do Windows (`AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`).
+
+Comandos:
+
+```bash
+# build app (renderer + electron main)
+npm run build:desktop
+
+# gera instalador NSIS em release/
+npm run dist:win
+```
+
+Saída esperada (pasta `release/`):
+
+- `Voice Note AI-Setup-1.0.0.exe`
+- artefatos auxiliares (`latest.yml`, `.blockmap`) para auto-update futuro.
+
+Observações:
+
+- O instalador usa upgrade in-place (mesmo `appId`/`productName`).
+- Sem assinatura de código, o Windows SmartScreen pode exibir alerta. Para distribuição ampla, use code signing.
+
+## Atualização de versão (patch/minor/major)
+
+Fluxo recomendado:
+
+```bash
+# 1) subir versão sem criar tag automática
+npm version patch --no-git-tag-version
+
+# 2) validar qualidade
+npm run quality
+
+# 3) gerar novo instalador
+npm run dist:win
+```
+
+Notas de update:
+
+- Instalar a nova versão por cima da anterior (NSIS faz upgrade).
+- Antes de mudanças grandes, faça backup de `%APPDATA%\voice-note-ai\settings.json`, `%APPDATA%\voice-note-ai\dictionary.json` e `%APPDATA%\voice-note-ai\history.json`.
 
 ## Hotkey / comportamento
 
@@ -32,6 +92,7 @@ npm run dev:desktop
   - se precisar forçar keycodes, use `VOICE_HOLD_KEYCODES` (ex: `29,3675`)
 - Auto-paste (Windows):
   - padrão recomendado: ligado (`VOICE_AUTO_PASTE=1`)
+  - o `VOICE_AUTO_PASTE` define o default inicial quando o settings local ainda não existe
   - o fluxo usa mutex e restauração segura de clipboard (não sobrescreve cópia nova do usuário)
 
 ## Estilo de texto e correções inteligentes
@@ -60,8 +121,24 @@ npm run dev:desktop
   - `ptt_to_first_partial_ms`
   - `ptt_to_final_ms`
   - `inject_total_ms`
+  - `resolve_window_ms`
+  - `paste_attempt_ms`
+  - `clipboard_restore_ms`
   - `retry_count`
   - `session_duration_ms`
+
+## Histórico local
+
+- O app salva transcrições finais localmente (aba **Histórico**) por padrão.
+- Configuração padrão:
+  - histórico habilitado
+  - retenção de 30 dias
+- Operações suportadas:
+  - busca por texto
+  - copiar uma transcrição
+  - remover item específico
+  - limpar histórico completo
+- Persistência: `%APPDATA%\voice-note-ai\history.json`
 
 ## Comandos de formatação (PT+EN)
 
@@ -103,11 +180,12 @@ No Windows (PowerShell ou CMD):
 
 ```bash
 cd C:\Users\allys\dev\voice-note-ai
-npm install
+npm ci --workspaces=false
 npm run dev:desktop
 ```
 
 Checklist pós-sync:
+
 - hotkey `Ctrl+Win` entra em `Listening` e ao soltar vai para `Finalizing` -> `Idle`
 - em Windows, o hook global carrega sem bloquear captura
 - HUD permanece acima dos apps
@@ -117,8 +195,8 @@ Checklist pós-sync:
 
 - Em apps comuns (Notepad, Slack, Chrome) normalmente funciona sem drama.
 - Dois pontos podem chamar atenção:
-  1) **Hook global de teclado** (parece “keylogger” para alguns antivírus, embora aqui a gente só use para detectar o chord e iniciar/parar a gravação).
-  2) **Auto-paste** (simulação de `Ctrl+V`) pode falhar em apps/janelas “protegidas” ou com políticas restritas.
+  1. **Hook global de teclado** (parece “keylogger” para alguns antivírus, embora aqui a gente só use para detectar o chord e iniciar/parar a gravação).
+  2. **Auto-paste** (simulação de `Ctrl+V`) pode falhar em apps/janelas “protegidas” ou com políticas restritas.
 - Por isso o MVP mantém fallback seguro: **sempre copia pro clipboard**; auto-paste é opcional.
 
 ## Azure Speech (env vars)
@@ -130,3 +208,5 @@ Checklist pós-sync:
 - `VOICE_HUD` (default: `1`) mostra um indicador always-on-top no canto inferior direito (perto da taskbar)
 - `VOICE_HUD_DEBUG=1` transforma o HUD em janela normal (com frame/devtools) para debug se algo não aparecer
 - `VOICE_MAX_SESSION_SECONDS` (default: `90`)
+- `VOICE_HISTORY_ENABLED` (default: `1`) habilita histórico local
+- `VOICE_HISTORY_RETENTION_DAYS` (default: `30`) retenção do histórico
