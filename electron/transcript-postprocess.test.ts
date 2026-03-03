@@ -1,16 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { applyTranscriptPostprocess } from '@/lib/transcript-postprocess';
-import type { CanonicalTerm } from '@/electron';
-import { canonicalTermsFixture, transcriptCases } from '@/test/fixtures/transcript-cases';
+import { applyTranscriptPostprocess } from './transcript-postprocess.js';
+import { canonicalTermsFixture, transcriptCases } from '../src/test/fixtures/transcript-cases';
 
-const canonicalTerms: CanonicalTerm[] = canonicalTermsFixture;
-
-describe('transcript postprocess commands', () => {
+describe('electron transcript postprocess', () => {
   for (const testCase of transcriptCases) {
     it(testCase.name, () => {
       const output = applyTranscriptPostprocess(testCase.input, {
         toneMode: testCase.toneMode,
-        canonicalTerms,
+        canonicalTerms: canonicalTermsFixture,
         formatCommandsEnabled: testCase.formatCommandsEnabled,
       });
 
@@ -21,7 +18,7 @@ describe('transcript postprocess commands', () => {
   it('applies canonical replacements before punctuation', () => {
     const output = applyTranscriptPostprocess('anti gravity vírgula workspace', {
       toneMode: 'casual',
-      canonicalTerms,
+      canonicalTerms: canonicalTermsFixture,
       formatCommandsEnabled: true,
     });
     expect(output).toBe('Antigravity, Workspace');

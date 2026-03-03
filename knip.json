@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema-jsonc.json",
+  "entry": ["src/hud-main.tsx", "electron/main.ts"],
+  "project": ["src/**/*.{ts,tsx}", "electron/**/*.ts"],
+  "ignore": [
+    "electron/**/*.test.ts",
+    "src/audio/audio-worklet-globals.d.ts",
+    "electron/uiohook-napi.d.ts"
+  ]
+}

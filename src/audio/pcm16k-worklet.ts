@@ -1,3 +1,5 @@
+/// <reference lib="webworker" />
+
 type ProcessorOptions = {
   targetSampleRate: number;
   frameSamples: number;
@@ -62,4 +64,3 @@ class Pcm16kWorklet extends AudioWorkletProcessor {
 }
 
 registerProcessor('pcm16k-worklet', Pcm16kWorklet);
-

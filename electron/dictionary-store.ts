@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 export type DictionaryTerm = {
   id: string;
@@ -23,7 +23,7 @@ export type DictionaryUpdateInput = {
 };
 
 export function normalizeDictionaryTerm(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 export function dedupeCaseInsensitive(values: string[]): string[] {
@@ -41,7 +41,7 @@ export function dedupeCaseInsensitive(values: string[]): string[] {
 }
 
 function normalizeHint(value?: string): string | undefined {
-  if (typeof value !== "string") return undefined;
+  if (typeof value !== 'string') return undefined;
   const normalized = normalizeDictionaryTerm(value);
   return normalized || undefined;
 }
@@ -53,10 +53,10 @@ function parseDictionary(raw: unknown): DictionaryTerm[] {
   const seenTerms = new Set<string>();
 
   for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
+    if (!item || typeof item !== 'object') continue;
     const candidate = item as Partial<DictionaryTerm>;
-    if (typeof candidate.id !== "string" || !candidate.id.trim()) continue;
-    const term = normalizeDictionaryTerm(typeof candidate.term === "string" ? candidate.term : "");
+    if (typeof candidate.id !== 'string' || !candidate.id.trim()) continue;
+    const term = normalizeDictionaryTerm(typeof candidate.term === 'string' ? candidate.term : '');
     if (!term) continue;
 
     const id = candidate.id.trim();
@@ -71,7 +71,10 @@ function parseDictionary(raw: unknown): DictionaryTerm[] {
       term,
       hintPt: normalizeHint(candidate.hintPt),
       enabled: candidate.enabled !== false,
-      createdAt: typeof candidate.createdAt === "string" && candidate.createdAt ? candidate.createdAt : new Date().toISOString(),
+      createdAt:
+        typeof candidate.createdAt === 'string' && candidate.createdAt
+          ? candidate.createdAt
+          : new Date().toISOString(),
     });
   }
 
@@ -93,13 +96,15 @@ export class DictionaryStore {
   async add(input: DictionaryAddInput): Promise<DictionaryTerm> {
     const term = normalizeDictionaryTerm(input.term);
     if (!term) {
-      throw new Error("Term is required.");
+      throw new Error('Term is required.');
     }
 
     const entries = await this.loadRaw();
-    const exists = entries.some((item) => item.term.toLocaleLowerCase() === term.toLocaleLowerCase());
+    const exists = entries.some(
+      (item) => item.term.toLocaleLowerCase() === term.toLocaleLowerCase(),
+    );
     if (exists) {
-      throw new Error("Term already exists.");
+      throw new Error('Term already exists.');
     }
 
     const next: DictionaryTerm = {
@@ -118,21 +123,21 @@ export class DictionaryStore {
   async update(input: DictionaryUpdateInput): Promise<DictionaryTerm> {
     const id = input.id?.trim();
     if (!id) {
-      throw new Error("Term id is required.");
+      throw new Error('Term id is required.');
     }
 
     const entries = await this.loadRaw();
     const index = entries.findIndex((item) => item.id === id);
     if (index < 0) {
-      throw new Error("Term not found.");
+      throw new Error('Term not found.');
     }
 
     const current = entries[index];
     const nextTerm =
-      typeof input.term === "string" ? normalizeDictionaryTerm(input.term) : current.term;
+      typeof input.term === 'string' ? normalizeDictionaryTerm(input.term) : current.term;
 
     if (!nextTerm) {
-      throw new Error("Term cannot be empty.");
+      throw new Error('Term cannot be empty.');
     }
 
     const duplicate = entries.some(
@@ -140,14 +145,14 @@ export class DictionaryStore {
         currentIndex !== index && item.term.toLocaleLowerCase() === nextTerm.toLocaleLowerCase(),
     );
     if (duplicate) {
-      throw new Error("Term already exists.");
+      throw new Error('Term already exists.');
     }
 
     const updated: DictionaryTerm = {
       ...current,
       term: nextTerm,
-      hintPt: typeof input.hintPt === "string" ? normalizeHint(input.hintPt) : current.hintPt,
-      enabled: typeof input.enabled === "boolean" ? input.enabled : current.enabled,
+      hintPt: typeof input.hintPt === 'string' ? normalizeHint(input.hintPt) : current.hintPt,
+      enabled: typeof input.enabled === 'boolean' ? input.enabled : current.enabled,
     };
 
     entries[index] = updated;
@@ -158,7 +163,7 @@ export class DictionaryStore {
   async remove(id: string): Promise<{ ok: boolean }> {
     const cleanId = id.trim();
     if (!cleanId) {
-      throw new Error("Term id is required.");
+      throw new Error('Term id is required.');
     }
 
     const entries = await this.loadRaw();
@@ -174,21 +179,21 @@ export class DictionaryStore {
     const entries = await this.loadRaw();
     const terms = entries
       .filter((item) => item.enabled)
-      .flatMap((item) => [item.term, item.hintPt ?? ""]);
+      .flatMap((item) => [item.term, item.hintPt ?? '']);
 
     return dedupeCaseInsensitive([...extraValues, ...terms]);
   }
 
   private async loadRaw(): Promise<DictionaryTerm[]> {
     try {
-      const content = await readFile(this.filePath, "utf8");
+      const content = await readFile(this.filePath, 'utf8');
       const parsed = parseDictionary(JSON.parse(content));
       // Self-heal malformed file on read.
       await this.persist(parsed);
       return parsed;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") return [];
+      if (code === 'ENOENT') return [];
       if (error instanceof SyntaxError) {
         await this.persist([]);
         return [];
@@ -199,6 +204,6 @@ export class DictionaryStore {
 
   private async persist(entries: DictionaryTerm[]): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(entries, null, 2), "utf8");
+    await writeFile(this.filePath, JSON.stringify(entries, null, 2), 'utf8');
   }
 }

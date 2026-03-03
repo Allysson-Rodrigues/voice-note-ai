@@ -11,9 +11,13 @@ node_modules
 dist
 dist-ssr
 electron-dist
+coverage
+release
+*.tar.gz
 *.local
 WisprHUD.jsx
 HudPillDemo.jsx
+Wispr flow like.jsx
 
 # Editor directories and files
 .vscode/*

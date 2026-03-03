@@ -1,4 +1,4 @@
-export type LatencyProfile = "fast" | "balanced" | "accurate";
+export type LatencyProfile = 'fast' | 'balanced' | 'accurate';
 
 export const STOP_GRACE_BY_PROFILE: Record<LatencyProfile, number> = {
   fast: 80,
@@ -7,7 +7,7 @@ export const STOP_GRACE_BY_PROFILE: Record<LatencyProfile, number> = {
 };
 
 export function latencyProfileFromStopGrace(stopGraceMs: number): LatencyProfile {
-  if (stopGraceMs <= 120) return "fast";
-  if (stopGraceMs >= 300) return "accurate";
-  return "balanced";
+  if (stopGraceMs <= 120) return 'fast';
+  if (stopGraceMs >= 300) return 'accurate';
+  return 'balanced';
 }
