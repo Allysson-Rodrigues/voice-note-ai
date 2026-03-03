@@ -31,6 +31,7 @@ dotenv.config({ path: path.join(process.cwd(), '.env.local') });
 dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
+const IS_DEV = Boolean(DEV_SERVER_URL);
 const PRIMARY_HOTKEY = process.env.VOICE_HOTKEY ?? 'CommandOrControl+Super';
 const FALLBACK_HOTKEY = process.env.VOICE_HOTKEY_FALLBACK ?? 'CommandOrControl+Super+Space';
 const HOLD_TO_TALK_ENABLED = (process.env.VOICE_HOLD_TO_TALK ?? '1') !== '0';
@@ -498,6 +499,11 @@ function ensureTray() {
 async function bootstrap() {
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.antigravity.voice-note-ai');
+  }
+
+  if (IS_DEV) {
+    const devUserData = path.join(app.getPath('appData'), 'voice-note-ai-dev');
+    app.setPath('userData', devUserData);
   }
 
   settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'), settings);
