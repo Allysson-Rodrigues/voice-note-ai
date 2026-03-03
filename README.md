@@ -1,156 +1,156 @@
-# Voice Note AI (Windows-first, uso pessoal)
+# Voice Note AI (Windows-first, personal use)
 
-Ditado universal (Electron) com hotkey global que:
+Universal dictation app (Electron) with a global hotkey that:
 
-- inicia/para a captura do microfone
-- streama PCM 16kHz mono para o Azure Speech-to-Text
-- copia o texto final para o clipboard
-- no Windows, tenta colar automaticamente via `WM_PASTE` (handle alvo/foreground) com fallback `Ctrl+V` e `Shift+Insert`
-- mostra HUD em janela dedicada (`hud.html`) transparente e always-on-top
+- starts/stops microphone capture
+- streams 16kHz mono PCM to Azure Speech-to-Text
+- copies final text to the clipboard
+- on Windows, tries automatic paste via `WM_PASTE` (target/foreground handle), with `Ctrl+V` and `Shift+Insert` fallback
+- shows an always-on-top transparent HUD window (`hud.html`)
 
 ## Setup (dev)
 
-1. Crie um arquivo `.env.local` (use `.env.example` como base)
+1. Create a `.env.local` file (use `.env.example` as a base)
 
-2. Instale deps e rode:
+2. Install dependencies and run:
 
 ```bash
 npm ci --workspaces=false
 npm run dev:desktop
 ```
 
-## Configuração Azure no app instalado (.exe)
+## Azure config for installed app (.exe)
 
-Para o app já instalado no Windows, configure as variáveis no sistema (não apenas no `.env.local`):
+For the installed Windows app, configure variables in the OS environment (not only in `.env.local`):
 
-1. Abra **Editar as variáveis de ambiente do sistema**.
-2. Em **Variáveis de usuário**, adicione/edite:
+1. Open **Edit the system environment variables**.
+2. In **User variables**, add/edit:
    - `AZURE_SPEECH_KEY`
-   - `AZURE_SPEECH_REGION` (ex.: `brazilsouth`)
-   - opcional: `AZURE_SPEECH_LANGUAGE=pt-BR`
-3. Feche o app pela bandeja (**Quit**) e faça logoff/login (ou reinicie o Windows Explorer).
-4. Reabra o app e rode **Health Check**.
+   - `AZURE_SPEECH_REGION` (for example: `brazilsouth`)
+   - optional: `AZURE_SPEECH_LANGUAGE=pt-BR`
+3. Fully close the app from tray (**Quit**) and sign out/sign in again (or restart Windows Explorer).
+4. Reopen the app and run **Health Check**.
 
-Observação: no `.exe` empacotado, o `.env.local` não é a fonte mais confiável para variáveis de runtime do usuário final.
+Note: in the packaged `.exe`, `.env.local` is not the most reliable runtime source for end-user variables.
 
 ## Quality Gate (clean code)
 
 ```bash
-# gate recomendado para CI/local (lint + typecheck + coverage + ciclos + arquivos órfãos)
+# recommended local/CI gate (lint + typecheck + coverage + cycles + orphan files)
 npm run quality
 
-# versão estrita (inclui prettier no repo inteiro)
+# strict version (includes prettier across the whole repo)
 npm run quality:strict
 ```
 
-## Empacotar instalador Windows (.exe)
+## Build Windows installer (.exe)
 
-Pré-requisitos:
+Prerequisites:
 
-- Rodar o empacotamento no **Windows** (PowerShell/CMD), não no Linux puro.
-- Node.js + npm instalados.
-- Dependências instaladas (`npm ci --workspaces=false`).
-- Variáveis Azure configuradas no ambiente do Windows (`AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`).
+- Run packaging on **Windows** (PowerShell/CMD), not pure Linux.
+- Node.js + npm installed.
+- Dependencies installed (`npm ci --workspaces=false`).
+- Azure variables configured in the Windows environment (`AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION`).
 
-Comandos:
+Commands:
 
 ```bash
 # build app (renderer + electron main)
 npm run build:desktop
 
-# gera instalador NSIS em release/
+# generate NSIS installer in release/
 npm run dist:win
 ```
 
-Importante:
+Important:
 
-- Rode os comandos na pasta do projeto (onde existe `package.json`), por exemplo:
+- Run commands inside the project folder (where `package.json` exists), for example:
 
 ```powershell
 cd C:\Users\allys\dev\voice-note-ai
 ```
 
-Saída esperada (pasta `release/`):
+Expected output (`release/` folder):
 
 - `Voice Note AI-Setup-1.0.0.exe`
-- artefatos auxiliares (`latest.yml`, `.blockmap`) para auto-update futuro.
+- auxiliary artifacts (`latest.yml`, `.blockmap`) for future auto-update
 
-Observações:
+Notes:
 
-- O instalador usa upgrade in-place (mesmo `appId`/`productName`).
-- Sem assinatura de código, o Windows SmartScreen pode exibir alerta. Para distribuição ampla, use code signing.
-- Para abrir o instalador no PowerShell, use caminho entre aspas por causa de espaços no nome:
+- The installer performs in-place upgrade (same `appId`/`productName`).
+- Without code signing, Windows SmartScreen may show a warning. For broad distribution, use code signing.
+- To run the installer from PowerShell, use quotes because of spaces in filename:
 
 ```powershell
 & ".\release\Voice Note AI-Setup-1.0.0.exe"
 ```
 
-## Atualização de versão (patch/minor/major)
+## Version update (patch/minor/major)
 
-Fluxo recomendado:
+Recommended flow:
 
 ```bash
-# 1) subir versão sem criar tag automática
+# 1) bump version without creating git tag automatically
 npm version patch --no-git-tag-version
 
-# 2) validar qualidade
+# 2) validate quality
 npm run quality
 
-# 3) gerar novo instalador
+# 3) generate new installer
 npm run dist:win
 ```
 
-Notas de update:
+Update notes:
 
-- Instalar a nova versão por cima da anterior (NSIS faz upgrade).
-- Antes de mudanças grandes, faça backup de `%APPDATA%\voice-note-ai\settings.json`, `%APPDATA%\voice-note-ai\dictionary.json` e `%APPDATA%\voice-note-ai\history.json`.
+- Install the new version over the current one (NSIS upgrade).
+- Before major changes, back up `%APPDATA%\voice-note-ai\settings.json`, `%APPDATA%\voice-note-ai\dictionary.json`, and `%APPDATA%\voice-note-ai\history.json`.
 
-## Hotkey / comportamento
+## Hotkey / behavior
 
-- Hotkey default: `Ctrl+Win` (`CommandOrControl+Super`)
-- Em plataformas não-Windows, existe fallback para `Ctrl+Win+Space` (`CommandOrControl+Super+Space`) se a primária falhar
-- Para customizar:
+- Default hotkey: `Ctrl+Win` (`CommandOrControl+Super`)
+- On non-Windows platforms, there is fallback to `Ctrl+Win+Space` (`CommandOrControl+Super+Space`) if primary fails
+- Customize:
   - `VOICE_HOTKEY="CommandOrControl+Super"`
   - `VOICE_HOTKEY_FALLBACK="CommandOrControl+Super+Space"`
-- Hold-to-talk (segurar/soltar):
-  - default ligado (`VOICE_HOLD_TO_TALK=1`) no Windows com `uiohook-napi`
-  - no Windows, se o hook não carregar, a captura fica bloqueada (sem fallback toggle)
-  - default usa modificadores (`Ctrl + Win`) sem keycode fixo
-  - se precisar forçar keycodes, use `VOICE_HOLD_KEYCODES` (ex: `29,3675`)
+- Hold-to-talk:
+  - enabled by default (`VOICE_HOLD_TO_TALK=1`) on Windows with `uiohook-napi`
+  - on Windows, if hook fails to load, capture is blocked (no toggle fallback)
+  - default uses modifiers (`Ctrl + Win`) without fixed keycode
+  - if needed, force keycodes via `VOICE_HOLD_KEYCODES` (example: `29,3675`)
 - Auto-paste (Windows):
-  - padrão recomendado: ligado (`VOICE_AUTO_PASTE=1`)
-  - o `VOICE_AUTO_PASTE` define o default inicial quando o settings local ainda não existe
-  - o fluxo usa mutex e restauração segura de clipboard (não sobrescreve cópia nova do usuário)
+  - recommended default: enabled (`VOICE_AUTO_PASTE=1`)
+  - `VOICE_AUTO_PASTE` defines initial default when local settings do not exist yet
+  - flow uses mutex + safe clipboard restore (does not overwrite fresh user clipboard data)
 
-## Estilo de texto e correções inteligentes
+## Writing style and smart fixes
 
-- Perfis de escrita:
-  - `formal`: pontuação e normalização mais forte
-  - `casual`: equilíbrio entre naturalidade e legibilidade
-  - `very-casual`: mantém tom coloquial e reduz formalização
-- O app aplica correções canônicas pós-STT (ex.: `workspace -> Workspace`, `antigravity -> Antigravity`).
-- Você pode ajustar essas regras no tab **Dicionário > Correções inteligentes**.
+- Tone profiles:
+  - `formal`: stronger punctuation/normalization
+  - `casual`: balance between natural tone and readability
+  - `very-casual`: preserves colloquial tone with lighter formalization
+- App applies canonical post-STT fixes (example: `workspace -> Workspace`, `antigravity -> Antigravity`).
+- You can tune these rules in **Dictionary > Smart fixes**.
 
-## Troubleshooting de hotkey (Windows)
+## Hotkey troubleshooting (Windows)
 
-- Se a hotkey não registrar, o app mostra erro com o motivo atual.
-- Se `uiohook-napi` falhar no Windows, o app mostra erro e bloqueia captura até corrigir o hook.
-- Execute o app como administrador para testar conflito de privilégio.
-- Verifique atalhos globais já ocupando `Ctrl+Win`.
-- Ative `VOICE_HOLD_KEYCODES` apenas se o layout/teclado não responder bem com detecção por modificadores.
+- If hotkey registration fails, app shows the current reason.
+- If `uiohook-napi` fails on Windows, app shows error and blocks capture until fixed.
+- Run app as administrator to test privilege conflict.
+- Check for other global shortcuts using `Ctrl+Win`.
+- Enable `VOICE_HOLD_KEYCODES` only if layout/keyboard does not behave well with modifier detection.
 
-## Troubleshooting de build/instalação (Windows)
+## Build/install troubleshooting (Windows)
 
-- `npm ERR! enoent ... package.json`: você está em pasta errada; rode `cd` para o diretório do projeto.
-- `release\Voice ... could not be loaded`: no PowerShell, use `&` + caminho entre aspas para executar o `.exe`.
-- `Falha na captura: Unable to load a worklet's module.`: gere instalador atualizado (`npm run build:desktop && npm run dist:win`) e reinstale por cima.
+- `npm ERR! enoent ... package.json`: wrong directory; `cd` to project path first.
+- `release\Voice ... could not be loaded`: in PowerShell, run `.exe` with `&` and quoted path.
+- `Capture failed: Unable to load a worklet's module.`: generate updated installer (`npm run build:desktop && npm run dist:win`) and reinstall over current version.
 
-## Latência e confiabilidade
+## Latency and reliability
 
-- O app mantém perfil de latência equilibrado (`stopGraceMs=200`).
-- Timeout de sessão: `90s` (configurável em settings store).
-- Retry automático STT: 1 tentativa para falhas recuperáveis em sessões curtas (<30s), com replay de buffer local.
-- Telemetria no log:
+- App keeps balanced latency profile (`stopGraceMs=200`).
+- Session timeout: `90s` (configurable in settings store).
+- Automatic STT retry: 1 retry for recoverable failures in short sessions (<30s), replaying local audio buffer.
+- Telemetry in logs:
   - `ptt_to_first_partial_ms`
   - `ptt_to_final_ms`
   - `inject_total_ms`
@@ -160,43 +160,43 @@ Notas de update:
   - `retry_count`
   - `session_duration_ms`
 
-## Histórico local
+## Local history
 
-- O app salva transcrições finais localmente (aba **Histórico**) por padrão.
-- Configuração padrão:
-  - histórico habilitado
-  - retenção de 30 dias
-- Operações suportadas:
-  - busca por texto
-  - copiar uma transcrição
-  - remover item específico
-  - limpar histórico completo
-- Persistência: `%APPDATA%\voice-note-ai\history.json`
+- App stores final transcriptions locally (**History** tab) by default.
+- Default settings:
+  - history enabled
+  - retention: 30 days
+- Supported operations:
+  - text search
+  - copy transcription
+  - delete single item
+  - clear full history
+- Persistence path: `%APPDATA%\voice-note-ai\history.json`
 
-## Comandos de formatação (PT+EN)
+## Formatting commands (PT+EN)
 
-- O pós-processamento entende comandos explícitos:
+- Post-processing understands explicit commands:
   - `bullet point` / `bullet` / `tópico` / `topico` -> `•`
   - `item 1` / `número 1` / `numero 1` / `number 1` -> `1.`
-  - `nova linha` / `new line` -> quebra de linha
-- A opção pode ser ligada/desligada em **Configurações**.
+  - `nova linha` / `new line` -> line break
+- Feature can be enabled/disabled in **Settings**.
 
-## Ícone do app
+## App icon
 
-- Fonte do ícone: `assets/icons/app-icon.svg`
-- Geração de ícones:
+- Icon source: `assets/icons/app-icon.svg`
+- Generate icons:
 
 ```bash
 npm run icons:generate
 ```
 
-- Saída:
+- Output:
   - `public/favicon.png`
   - `public/favicon.ico`
 
-## Atualizar do WSL para Windows
+## Sync from WSL to Windows
 
-No WSL:
+In WSL:
 
 ```bash
 cd /home/allysson/projetos/01-projetos/voice-note-ai
@@ -209,7 +209,7 @@ rsync -a --delete \
   ./ /mnt/c/Users/allys/dev/voice-note-ai/
 ```
 
-No Windows (PowerShell ou CMD):
+On Windows (PowerShell or CMD):
 
 ```bash
 cd C:\Users\allys\dev\voice-note-ai
@@ -217,29 +217,29 @@ npm ci --workspaces=false
 npm run dev:desktop
 ```
 
-Checklist pós-sync:
+Post-sync checklist:
 
-- hotkey `Ctrl+Win` entra em `Listening` e ao soltar vai para `Finalizing` -> `Idle`
-- em Windows, o hook global carrega sem bloquear captura
-- HUD permanece acima dos apps
-- ditado funciona em Notepad/Slack/VS Code
+- hotkey `Ctrl+Win` enters `Listening`, then `Finalizing` -> `Idle` on release
+- on Windows, global hook loads without blocking capture
+- HUD stays above other apps
+- dictation works in Notepad/Slack/VS Code
 
-## “Vai parecer hack?”
+## "Will this look hacky?"
 
-- Em apps comuns (Notepad, Slack, Chrome) normalmente funciona sem drama.
-- Dois pontos podem chamar atenção:
-  1. **Hook global de teclado** (parece “keylogger” para alguns antivírus, embora aqui a gente só use para detectar o chord e iniciar/parar a gravação).
-  2. **Auto-paste** (simulação de `Ctrl+V`) pode falhar em apps/janelas “protegidas” ou com políticas restritas.
-- Por isso o MVP mantém fallback seguro: **sempre copia pro clipboard**; auto-paste é opcional.
+- In common apps (Notepad, Slack, Chrome), it usually works well.
+- Two areas may look suspicious:
+  1. **Global keyboard hook** (can look like keylogger behavior to some antivirus tools, even though this app only detects the hotkey chord).
+  2. **Auto-paste** (`Ctrl+V` simulation) may fail in protected/restricted windows.
+- Therefore MVP keeps a safe fallback: **always copy to clipboard**; auto-paste is optional.
 
 ## Azure Speech (env vars)
 
 - `AZURE_SPEECH_KEY`
 - `AZURE_SPEECH_REGION`
-- opcional: `AZURE_SPEECH_LANGUAGE` (default: `pt-BR`)
-- opcional: `VOICE_PHRASES` (lista separada por vírgula com gírias/termos em inglês/nome de apps)
-- `VOICE_HUD` (default: `1`) mostra um indicador always-on-top no canto inferior direito (perto da taskbar)
-- `VOICE_HUD_DEBUG=1` transforma o HUD em janela normal (com frame/devtools) para debug se algo não aparecer
+- optional: `AZURE_SPEECH_LANGUAGE` (default: `pt-BR`)
+- optional: `VOICE_PHRASES` (comma-separated hints for slang/English/app names)
+- `VOICE_HUD` (default: `1`) shows always-on-top indicator in bottom-right corner
+- `VOICE_HUD_DEBUG=1` turns HUD into normal debug window (frame/devtools)
 - `VOICE_MAX_SESSION_SECONDS` (default: `90`)
-- `VOICE_HISTORY_ENABLED` (default: `1`) habilita histórico local
-- `VOICE_HISTORY_RETENTION_DAYS` (default: `30`) retenção do histórico
+- `VOICE_HISTORY_ENABLED` (default: `1`) enables local history
+- `VOICE_HISTORY_RETENTION_DAYS` (default: `30`) history retention
