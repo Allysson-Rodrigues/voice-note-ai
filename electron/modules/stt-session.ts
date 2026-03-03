@@ -6,6 +6,8 @@ const MAX_WARMUP_BUFFER_BYTES = 64 * 1024;
 const MAX_RING_BUFFER_BYTES_30S = 16000 * 2 * 30;
 const RETRY_REPLAY_BYTES = 16000 * 2 * 6;
 const RETRY_BACKOFF_MS = 250;
+const HUD_SUCCESS_VISIBLE_MS = 1100;
+const HUD_ERROR_VISIBLE_MS = 900;
 
 type HudVisualState = 'idle' | 'listening' | 'finalizing' | 'injecting' | 'success' | 'error';
 type HudState = {
@@ -777,14 +779,14 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
       } else {
         setHudForSession({ state: 'success' });
       }
-      await sleep(760);
+      await sleep(HUD_SUCCESS_VISIBLE_MS);
       setHudForSession({ state: 'idle' });
       return { ok: true, text: finalText };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       options.broadcast('stt:error', { sessionId: session.sessionId, message });
       setHudForSession({ state: 'error', message });
-      await sleep(600);
+      await sleep(HUD_ERROR_VISIBLE_MS);
       setHudForSession({ state: 'idle' });
       return { ok: false };
     } finally {

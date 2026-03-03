@@ -20,7 +20,6 @@ const BLOCK_SIZE = 3;
 const BLOCK_GAP = 1.5;
 const COL_GAP = 1.5;
 const WAVE_H = MAX_BLOCKS * BLOCK_SIZE + (MAX_BLOCKS - 1) * BLOCK_GAP;
-const WAVE_W = COL_COUNT * BLOCK_SIZE + (COL_COUNT - 1) * COL_GAP;
 
 const AMPLITUDE_PROFILE = [
   0.2, 0.45, 0.3, 0.7, 0.38, 0.85, 0.5, 0.95, 0.6, 0.75, 0.35, 0.9, 0.55, 1.0, 0.65, 0.82, 0.42,
@@ -118,27 +117,100 @@ function IconMic({ hudState }: { hudState: HudState }) {
   );
 }
 
+function Visualizer({
+  hudState,
+  levelRef,
+}: {
+  hudState: HudState;
+  levelRef: { current: number };
+}) {
+  const [levels, setLevels] = useState<number[]>(
+    () => Array.from({ length: COL_COUNT }, (_, index) => IDLE_PROFILE[index] ?? 0.1),
+  );
+
+  useEffect(() => {
+    let rafId = 0;
+
+    const tick = () => {
+      const now = performance.now() / 1000;
+      const liveLevel = clamp01(levelRef.current);
+
+      setLevels((previous) =>
+        previous.map((current, index) => {
+          const amplitude = AMPLITUDE_PROFILE[index] ?? 0.2;
+          const idle = IDLE_PROFILE[index] ?? 0.1;
+          let next = current;
+
+          if (hudState === 'listening') {
+            const noise = Math.sin(now * (8 + index * 0.3)) * 0.2;
+            next = clamp01(amplitude * (0.32 + liveLevel * 0.95) + noise);
+          } else if (hudState === 'finalizing') {
+            const scan = Math.sin(now * 10 - index * 0.5);
+            next = scan > 0.8 ? 0.8 : 0.1;
+          } else if (hudState === 'injecting') {
+            const scan = Math.sin(now * 12 - index * 0.5);
+            next = scan > 0.75 ? 0.9 : 0.12;
+          } else if (hudState === 'success') {
+            next = 0.3 + Math.sin(now * 4 - index * 0.2) * 0.1;
+          } else if (hudState === 'error') {
+            next = Math.random() > 0.95 ? 0.6 : 0.05;
+          } else {
+            const drift = Math.sin(now * 2 + index) * 0.05;
+            next = Math.max(0.05, idle + drift);
+          }
+
+          const smoothing = hudState === 'listening' ? 0.35 : 0.28;
+          return current + (clamp01(next) - current) * smoothing;
+        }),
+      );
+
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [hudState, levelRef]);
+
+  return (
+    <div
+      className="hud-wave-canvas"
+      style={{
+        height: `${WAVE_H}px`,
+        gap: `${COL_GAP}px`,
+      }}
+      aria-hidden
+    >
+      {levels.map((level, columnIndex) => {
+        const activeBlocks = Math.round(clamp01(level) * MAX_BLOCKS);
+
+        return (
+          <div className="hud-wave-column" style={{ gap: `${BLOCK_GAP}px` }} key={columnIndex}>
+            {Array.from({ length: MAX_BLOCKS }).map((_, blockIndex) => (
+              <div
+                key={blockIndex}
+                className="hud-wave-block"
+                style={{
+                  width: `${BLOCK_SIZE}px`,
+                  height: `${BLOCK_SIZE}px`,
+                  background: resolveBlockColor(hudState, blockIndex < activeBlocks),
+                }}
+              />
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function WisprHudPill() {
   const [hudState, setHudState] = useState<HudState>('idle');
   const [durationSec, setDurationSec] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
 
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const levelsRef = useRef<Float32Array>(new Float32Array(COL_COUNT).fill(0.1));
   const targetLevelRef = useRef(0);
-  const rafRef = useRef<number | null>(null);
   const timerRef = useRef<number | null>(null);
   const startedAtRef = useRef<number | null>(null);
-  const hudStateRef = useRef<HudState>('idle');
-
-  hudStateRef.current = hudState;
-
-  const stopRaf = useCallback(() => {
-    if (rafRef.current != null) {
-      window.cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-  }, []);
 
   const stopTimer = useCallback(() => {
     if (timerRef.current != null) {
@@ -146,85 +218,6 @@ export default function WisprHudPill() {
       timerRef.current = null;
     }
   }, []);
-
-  const drawWave = useCallback((state: HudState) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
-    const widthPx = Math.ceil(WAVE_W * dpr);
-    const heightPx = Math.ceil(WAVE_H * dpr);
-    if (canvas.width !== widthPx || canvas.height !== heightPx) {
-      canvas.width = widthPx;
-      canvas.height = heightPx;
-      canvas.style.width = `${WAVE_W}px`;
-      canvas.style.height = `${WAVE_H}px`;
-    }
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, WAVE_W, WAVE_H);
-
-    const levels = levelsRef.current;
-    for (let columnIndex = 0; columnIndex < COL_COUNT; columnIndex += 1) {
-      const level = levels[columnIndex] ?? 0.1;
-      const activeBlocks = Math.round(clamp01(level) * MAX_BLOCKS);
-      const x = columnIndex * (BLOCK_SIZE + COL_GAP);
-
-      for (let blockIndex = 0; blockIndex < MAX_BLOCKS; blockIndex += 1) {
-        const y = WAVE_H - BLOCK_SIZE - blockIndex * (BLOCK_SIZE + BLOCK_GAP);
-        ctx.fillStyle = resolveBlockColor(state, blockIndex < activeBlocks);
-        ctx.fillRect(x, y, BLOCK_SIZE, BLOCK_SIZE);
-      }
-    }
-  }, []);
-
-  const animateVisualizer = useCallback(() => {
-    stopRaf();
-
-    const tick = () => {
-      const state = hudStateRef.current;
-      const now = performance.now() / 1000;
-      const levels = levelsRef.current;
-
-      for (let index = 0; index < levels.length; index += 1) {
-        const current = levels[index] ?? 0.1;
-        const listeningLevel = clamp01(targetLevelRef.current);
-        const amplitude = AMPLITUDE_PROFILE[index] ?? 0.2;
-        const idle = IDLE_PROFILE[index] ?? 0.1;
-        let next = current;
-
-        if (state === 'listening') {
-          const noise = Math.sin(now * (8 + index * 0.3)) * 0.2;
-          next = clamp01(amplitude * (0.32 + listeningLevel * 0.95) + noise);
-        } else if (state === 'finalizing') {
-          const scan = Math.sin(now * 10 - index * 0.5);
-          next = scan > 0.8 ? 0.8 : 0.1;
-        } else if (state === 'injecting') {
-          const scan = Math.sin(now * 12 - index * 0.5);
-          next = scan > 0.75 ? 0.9 : 0.12;
-        } else if (state === 'success') {
-          next = 0.3 + Math.sin(now * 4 - index * 0.2) * 0.1;
-        } else if (state === 'error') {
-          next = Math.random() > 0.95 ? 0.6 : 0.05;
-        } else {
-          const centerDist = Math.abs(index - COL_COUNT / 2);
-          const breath = Math.sin(now * 1.2 - centerDist * 0.15) * 0.12;
-          next = Math.max(0.05, idle * 0.7 + breath);
-        }
-
-        const smoothing = state === 'listening' ? 0.35 : 0.28;
-        levels[index] = current + (clamp01(next) - current) * smoothing;
-      }
-
-      drawWave(state);
-      rafRef.current = window.requestAnimationFrame(tick);
-    };
-
-    rafRef.current = window.requestAnimationFrame(tick);
-  }, [drawWave, stopRaf]);
 
   useEffect(() => {
     if (!window.voiceNoteAI) return;
@@ -238,7 +231,6 @@ export default function WisprHudPill() {
         startedAtRef.current = null;
         stopTimer();
         targetLevelRef.current = 0;
-        animateVisualizer();
         return;
       }
 
@@ -250,12 +242,10 @@ export default function WisprHudPill() {
           if (!startedAtRef.current) return;
           setDurationSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
         }, 500);
-        animateVisualizer();
         return;
       }
 
       stopTimer();
-      animateVisualizer();
     });
 
     const offLevel = window.voiceNoteAI.onHudLevel((payload: HudLevelEvent) => {
@@ -269,16 +259,13 @@ export default function WisprHudPill() {
           })
         : () => {};
 
-    animateVisualizer();
-
     return () => {
       offHud();
       offLevel();
       offHover();
       stopTimer();
-      stopRaf();
     };
-  }, [animateVisualizer, stopRaf, stopTimer]);
+  }, [stopTimer]);
 
   const isExpanded = hudState !== 'idle' || isHovered;
   const idleHoveredClass = hudState === 'idle' && isHovered ? 'hovered' : '';
@@ -295,7 +282,7 @@ export default function WisprHudPill() {
                 <IconMic hudState={hudState} />
               </div>
               <div className="hud-dot" />
-              <canvas ref={canvasRef} className="hud-wave-canvas" aria-hidden />
+              <Visualizer hudState={hudState} levelRef={targetLevelRef} />
             </div>
           </div>
           <div className="hud-label-group">
