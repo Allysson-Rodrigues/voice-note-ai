@@ -1,22 +1,7 @@
-/// <reference lib="webworker" />
-
-type ProcessorOptions = {
-  targetSampleRate: number;
-  frameSamples: number;
-};
-
 class Pcm16kWorklet extends AudioWorkletProcessor {
-  private targetSampleRate: number;
-  private frameSamples: number;
-  private ratio: number;
-  private lastSample: number;
-  private pos: number;
-  private out: Int16Array;
-  private outIndex: number;
-
-  constructor(options?: AudioWorkletNodeOptions) {
+  constructor(options = {}) {
     super();
-    const opts = (options?.processorOptions ?? {}) as Partial<ProcessorOptions>;
+    const opts = options.processorOptions ?? {};
 
     this.targetSampleRate = opts.targetSampleRate ?? 16000;
     this.frameSamples = opts.frameSamples ?? 320; // 20ms at 16kHz
@@ -27,7 +12,7 @@ class Pcm16kWorklet extends AudioWorkletProcessor {
     this.outIndex = 0;
   }
 
-  private pushSample(floatSample: number) {
+  pushSample(floatSample) {
     const clamped = Math.max(-1, Math.min(1, floatSample));
     const int16 = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
     this.out[this.outIndex++] = int16 | 0;
@@ -39,7 +24,7 @@ class Pcm16kWorklet extends AudioWorkletProcessor {
     }
   }
 
-  process(inputs: Float32Array[][]) {
+  process(inputs) {
     const inputChannel = inputs[0]?.[0];
     if (!inputChannel || inputChannel.length === 0) return true;
 

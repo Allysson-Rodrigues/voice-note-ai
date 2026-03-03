@@ -48,7 +48,8 @@ function getOrCreateAudioContext() {
 async function ensureWorkletLoaded(audioContext: AudioContext) {
   if (workletLoaded) return;
   if (!workletLoadPromise) {
-    const workletUrl = new URL('./pcm16k-worklet.ts', import.meta.url);
+    // Keep the worklet in plain .js so Vite emits JavaScript, not .ts asset bytes.
+    const workletUrl = new URL('./pcm16k-worklet.js', import.meta.url);
     workletLoadPromise = audioContext.audioWorklet.addModule(workletUrl).then(() => {
       workletLoaded = true;
     });
