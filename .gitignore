@@ -15,6 +15,10 @@ coverage
 release
 *.tar.gz
 *.local
+# Environment files (keep only examples versioned)
+.env
+.env.*
+!.env.example
 WisprHUD.jsx
 HudPillDemo.jsx
 Wispr flow like.jsx
