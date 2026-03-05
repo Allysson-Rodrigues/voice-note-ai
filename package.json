@@ -1,7 +1,7 @@
 {
-  "name": "voice-note-ai",
+  "name": "vox-type",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Universal push-to-talk dictation app for Windows with Azure Speech-to-Text.",
   "author": "Allysson",
   "main": "electron-dist/main.js",
@@ -46,7 +46,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.2",
-    "framer-motion": "^12.34.3",
     "lucide-react": "^0.462.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.48.0",
     "react": "^18.3.1",
@@ -91,8 +90,8 @@
     "wait-on": "^9.0.4"
   },
   "build": {
-    "appId": "com.antigravity.voice-note-ai",
-    "productName": "Voice Note AI",
+    "appId": "com.antigravity.vox-type",
+    "productName": "Vox Type",
     "directories": {
       "output": "release"
     },

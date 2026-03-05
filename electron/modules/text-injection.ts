@@ -6,9 +6,10 @@ import {
   resolvePreferredWindowHandle,
   type PasteAttempt,
 } from '../injection-plan.js';
+import { logPerf, logWarn } from '../logger.js';
 
 const CLIPBOARD_RESTORE_MAX_MS = 200;
-const CLIPBOARD_TX_TIMEOUT_MS = 1200;
+const CLIPBOARD_TX_TIMEOUT_MS = 3000;
 const APP_KEY_CACHE_TTL_MS = 15000;
 const APP_KEY_CACHE_MAX_ENTRIES = 128;
 
@@ -40,6 +41,8 @@ type TextInjectionServiceOptions = {
   rememberInjectionMethod: (appKey: string | null, method: PasteAttempt) => Promise<void>;
 };
 
+type InjectionMethodStats = Record<PasteAttempt, { success: number; failure: number }>;
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
@@ -63,6 +66,8 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): 
 function windowsLineEndings(text: string) {
   return text.replace(/\r\n?/g, '\n').replace(/\n/g, '\r\n');
 }
+
+// ── PowerShell spawn (original, proven approach) ───────────────────────
 
 async function runPowerShell(command: string, timeoutMs = 900) {
   return await new Promise<string>((resolve, reject) => {
@@ -88,7 +93,7 @@ async function runPowerShell(command: string, timeoutMs = 900) {
       try {
         ps.kill();
       } catch {
-        // ignore
+        /* ignore */
       }
       reject(new Error('powershell timeout'));
     }, timeoutMs);
@@ -99,12 +104,10 @@ async function runPowerShell(command: string, timeoutMs = 900) {
     ps.stderr.on('data', (chunk) => {
       stderr += chunk.toString();
     });
-
     ps.on('error', (error) => {
       clearTimeout(timer);
       reject(error);
     });
-
     ps.on('exit', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve(stdout.trim());
@@ -112,6 +115,8 @@ async function runPowerShell(command: string, timeoutMs = 900) {
     });
   });
 }
+
+// ── Win32 helpers ──────────────────────────────────────────────────────
 
 async function getForegroundWindowHandle() {
   if (process.platform !== 'win32') return null;
@@ -173,6 +178,72 @@ async function getWindowAppKeyByHandle(handle: string | null) {
   }
 }
 
+// Phase 2: Single consolidated call — resolve + focus + appKey (1 spawn instead of 4-6)
+type ResolvedWindowInfo = {
+  targetReady: boolean;
+  currentHandle: string | null;
+  appKey: string | null;
+};
+
+async function resolveTargetWindowInfo(
+  targetWindowHandle: string | null,
+): Promise<ResolvedWindowInfo> {
+  if (process.platform !== 'win32') {
+    return { targetReady: true, currentHandle: null, appKey: null };
+  }
+
+  const target = targetWindowHandle?.trim() ?? '';
+  const hasTarget = Boolean(target && /^-?\d+$/.test(target));
+
+  const focusLines = hasTarget
+    ? [
+        `$target = [int64]${target}`,
+        'if ($current -ne $target) {',
+        '  [void][VoiceNote.NativeWin32All]::SetForegroundWindow([System.IntPtr]::new($target))',
+        '  Start-Sleep -Milliseconds 50',
+        '  $current = [VoiceNote.NativeWin32All]::GetForegroundWindow().ToInt64()',
+        '  $ready = ($current -eq $target)',
+        '}',
+      ]
+    : [];
+
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    'if (-not ("VoiceNote.NativeWin32All" -as [type])) {',
+    'Add-Type -Namespace VoiceNote -Name NativeWin32All -MemberDefinition @"',
+    '  [System.Runtime.InteropServices.DllImport("user32.dll")]',
+    '  public static extern System.IntPtr GetForegroundWindow();',
+    '  [System.Runtime.InteropServices.DllImport("user32.dll")]',
+    '  public static extern bool SetForegroundWindow(System.IntPtr hWnd);',
+    '  [System.Runtime.InteropServices.DllImport("user32.dll")]',
+    '  public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint lpdwProcessId);',
+    '"@ }',
+    '$current = [VoiceNote.NativeWin32All]::GetForegroundWindow().ToInt64()',
+    '$ready = $true',
+    ...focusLines,
+    '$app = ""',
+    '$wpid = 0',
+    '[void][VoiceNote.NativeWin32All]::GetWindowThreadProcessId([System.IntPtr]::new($current), [ref]$wpid)',
+    'if ($wpid -ne 0) {',
+    '  $proc = Get-Process -Id $wpid -ErrorAction SilentlyContinue',
+    '  if ($proc -and $proc.ProcessName) { $app = $proc.ProcessName }',
+    '}',
+    '[Console]::Out.Write((@{ handle = "$current"; ready = [bool]$ready; app = $app } | ConvertTo-Json -Compress))',
+  ].join('; ');
+
+  try {
+    const raw = await runPowerShell(script, 1500);
+    const parsed = JSON.parse(raw) as { handle?: string; ready?: boolean; app?: string };
+    return {
+      targetReady: parsed.ready !== false,
+      currentHandle: parsed.handle && parsed.handle !== '0' ? parsed.handle : null,
+      appKey: parsed.app ? parsed.app.toLowerCase() : null,
+    };
+  } catch {
+    return { targetReady: false, currentHandle: null, appKey: null };
+  }
+}
+
 async function focusWindowByHandle(handle: string) {
   if (process.platform !== 'win32' || !handle) return false;
 
@@ -202,7 +273,6 @@ async function windowsSendCtrlV() {
     '$wshell = New-Object -ComObject WScript.Shell',
     "Start-Sleep -Milliseconds 40; $wshell.SendKeys('^v')",
   ].join('; ');
-
   await runPowerShell(script, 1000);
 }
 
@@ -212,7 +282,6 @@ async function windowsSendShiftInsert() {
     '$wshell = New-Object -ComObject WScript.Shell',
     "Start-Sleep -Milliseconds 40; $wshell.SendKeys('+{INSERT}')",
   ].join('; ');
-
   await runPowerShell(script, 1000);
 }
 
@@ -241,6 +310,8 @@ async function windowsPasteToHandle(handle: string) {
   }
 }
 
+// ── Clipboard helpers ──────────────────────────────────────────────────
+
 function snapshotClipboard(): ClipboardSnapshot {
   let image: Electron.NativeImage | null = null;
   try {
@@ -250,9 +321,9 @@ function snapshotClipboard(): ClipboardSnapshot {
     image = null;
   }
 
-  let text = '';
-  let html = '';
-  let rtf = '';
+  let text = '',
+    html = '',
+    rtf = '';
   try {
     text = clipboard.readText();
   } catch {
@@ -268,7 +339,6 @@ function snapshotClipboard(): ClipboardSnapshot {
   } catch {
     rtf = '';
   }
-
   return { text, html, rtf, image };
 }
 
@@ -278,26 +348,11 @@ function restoreClipboard(snapshot: ClipboardSnapshot) {
   if (snapshot.html) payload.html = snapshot.html;
   if (snapshot.rtf) payload.rtf = snapshot.rtf;
   if (snapshot.image && !snapshot.image.isEmpty()) payload.image = snapshot.image;
-
   if (Object.keys(payload).length === 0) {
     clipboard.clear();
     return;
   }
-
   clipboard.write(payload);
-}
-
-async function ensureTargetWindow(targetWindowHandle: string | null) {
-  if (process.platform !== 'win32') return true;
-  if (!targetWindowHandle) return true;
-
-  const current = await getForegroundWindowHandle();
-  if (current === targetWindowHandle) return true;
-
-  await focusWindowByHandle(targetWindowHandle);
-  await sleep(70);
-  const after = await getForegroundWindowHandle();
-  return after === targetWindowHandle;
 }
 
 function getWindowHandle(win: BrowserWindow | null) {
@@ -305,7 +360,6 @@ function getWindowHandle(win: BrowserWindow | null) {
   try {
     const raw = win.getNativeWindowHandle();
     if (!raw || raw.length === 0) return null;
-
     let value = 0n;
     for (let i = 0; i < raw.length; i += 1) {
       value += BigInt(raw[i] ?? 0) << BigInt(i * 8);
@@ -316,9 +370,19 @@ function getWindowHandle(win: BrowserWindow | null) {
   }
 }
 
+// ── Service factory ────────────────────────────────────────────────────
+
 export function createTextInjectionService(options: TextInjectionServiceOptions) {
   let injectionQueue: Promise<void> = Promise.resolve();
   const appKeyCache = new Map<string, { appKey: string | null; expiresAt: number }>();
+  let recentInjectionStats: {
+    appKey: string | null;
+    method: PasteAttempt | null;
+    pasted: boolean;
+    skippedReason?: 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
+    updatedAt: string;
+  } | null = null;
+  const methodStats = new Map<string, InjectionMethodStats>();
 
   function withClipboardLock<T>(task: () => Promise<T>): Promise<T> {
     const pending = injectionQueue.then(task, task);
@@ -342,10 +406,7 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
 
   function cacheAppKey(handle: string | null, appKey: string | null) {
     if (!handle) return;
-    appKeyCache.set(handle, {
-      appKey,
-      expiresAt: Date.now() + APP_KEY_CACHE_TTL_MS,
-    });
+    appKeyCache.set(handle, { appKey, expiresAt: Date.now() + APP_KEY_CACHE_TTL_MS });
     if (appKeyCache.size <= APP_KEY_CACHE_MAX_ENTRIES) return;
     const firstKey = appKeyCache.keys().next().value;
     if (typeof firstKey === 'string') appKeyCache.delete(firstKey);
@@ -360,9 +421,50 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
     return appKey;
   }
 
+  function getMethodStats(appKey: string | null) {
+    const key = appKey ?? '__default__';
+    const existing = methodStats.get(key);
+    if (existing) return existing;
+    const seeded: InjectionMethodStats = {
+      'target-handle': { success: 0, failure: 0 },
+      'foreground-handle': { success: 0, failure: 0 },
+      'ctrl-v': { success: 0, failure: 0 },
+      'shift-insert': { success: 0, failure: 0 },
+    };
+    methodStats.set(key, seeded);
+    return seeded;
+  }
+
+  function prioritizeAttempts(appKey: string | null, attempts: PasteAttempt[]) {
+    const stats = getMethodStats(appKey);
+    return attempts.slice().sort((a, b) => {
+      const aScore = stats[a].success - stats[a].failure;
+      const bScore = stats[b].success - stats[b].failure;
+      return bScore - aScore;
+    });
+  }
+
+  function recordAttemptResult(
+    appKey: string | null,
+    method: PasteAttempt | null,
+    pasted: boolean,
+    skippedReason?: 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT',
+  ) {
+    recentInjectionStats = {
+      appKey,
+      method,
+      pasted,
+      skippedReason,
+      updatedAt: new Date().toISOString(),
+    };
+    if (!method) return;
+    const stats = getMethodStats(appKey);
+    if (pasted) stats[method].success += 1;
+    else stats[method].failure += 1;
+  }
+
   async function resolveInjectionTargetWindowHandle(sessionTargetWindowHandle: string | null) {
     if (process.platform !== 'win32') return sessionTargetWindowHandle;
-
     const internalHandles = [
       getWindowHandle(options.getMainWindow()),
       getWindowHandle(options.getHudWindow()),
@@ -394,31 +496,45 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
             return {
               pasted: false,
               restored: false,
-              metrics: {
-                resolveWindowMs,
-                pasteAttemptMs,
-                clipboardRestoreMs,
-              },
+              metrics: { resolveWindowMs, pasteAttemptMs, clipboardRestoreMs },
             };
           }
 
+          // Phase 2+3: consolidated resolve with cache fast-path
           const resolveWindowStartAt = Date.now();
-          const targetReady = await ensureTargetWindow(targetWindowHandle);
-          const currentHandle = await getForegroundWindowHandle().catch(() => null);
-          const appKey =
-            (await resolveWindowAppKey(targetWindowHandle)) ??
-            (currentHandle === targetWindowHandle
-              ? null
-              : await resolveWindowAppKey(currentHandle));
+          let targetReady: boolean;
+          let currentHandle: string | null;
+          let appKey: string | null;
+
+          const cachedAppKey = readCachedAppKey(targetWindowHandle);
+          if (targetWindowHandle && cachedAppKey !== undefined) {
+            // Phase 3: cache hit — trust primed handle, skip PS call
+            targetReady = true;
+            currentHandle = targetWindowHandle;
+            appKey = cachedAppKey;
+          } else {
+            // Phase 2: single consolidated PS call (1 spawn instead of 4-6)
+            const info = await resolveTargetWindowInfo(targetWindowHandle);
+            targetReady = info.targetReady;
+            currentHandle = info.currentHandle;
+            appKey = info.appKey;
+            if (currentHandle) cacheAppKey(currentHandle, appKey);
+            if (targetWindowHandle && targetWindowHandle !== currentHandle) {
+              cacheAppKey(targetWindowHandle, appKey);
+            }
+          }
           resolveWindowMs = Date.now() - resolveWindowStartAt;
 
           const preferredAttempt = options.getPreferredInjectionMethod(appKey);
-          const attemptOrder = buildPasteAttemptOrder({
-            targetReady,
-            targetHandle: targetWindowHandle,
-            foregroundHandle: currentHandle,
-            preferredAttempt,
-          });
+          const attemptOrder = prioritizeAttempts(
+            appKey,
+            buildPasteAttemptOrder({
+              targetReady,
+              targetHandle: targetWindowHandle,
+              foregroundHandle: currentHandle,
+              preferredAttempt,
+            }),
+          );
 
           const pasteAttemptStartAt = Date.now();
           let pasted = false;
@@ -431,52 +547,45 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
               if (pasted) usedAttempt = attempt;
               continue;
             }
-
             if (attempt === 'foreground-handle' && currentHandle) {
               pasted = await windowsPasteToHandle(currentHandle);
               if (pasted) usedAttempt = attempt;
               continue;
             }
-
             if (attempt === 'ctrl-v') {
               try {
                 await windowsSendCtrlV();
                 pasted = true;
                 usedAttempt = attempt;
               } catch {
-                // ignore and continue fallback chain
+                /* fallback */
               }
               continue;
             }
-
             if (attempt === 'shift-insert') {
               try {
                 await windowsSendShiftInsert();
                 pasted = true;
                 usedAttempt = attempt;
               } catch {
-                // ignore and continue fallback chain
+                /* fallback */
               }
             }
           }
           pasteAttemptMs = Date.now() - pasteAttemptStartAt;
 
           if (!pasted) {
+            const skippedReason = resolvePasteFailureReason(targetReady);
+            recordAttemptResult(appKey, usedAttempt, false, skippedReason);
             return {
               pasted: false,
               restored: false,
-              skippedReason: resolvePasteFailureReason(targetReady),
-              metrics: {
-                resolveWindowMs,
-                pasteAttemptMs,
-                clipboardRestoreMs,
-              },
+              skippedReason,
+              metrics: { resolveWindowMs, pasteAttemptMs, clipboardRestoreMs },
             };
           }
 
-          if (usedAttempt) {
-            await options.rememberInjectionMethod(appKey, usedAttempt);
-          }
+          if (usedAttempt) await options.rememberInjectionMethod(appKey, usedAttempt);
 
           let restored = false;
           const restoreStartAt = Date.now();
@@ -487,49 +596,55 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
                 if (clipboard.readText() === normalized) {
                   restoreClipboard(previous);
                   restored = true;
+                } else {
+                  clipboard.clear();
+                  logWarn('clipboard changed before restore', { appKey, method: usedAttempt });
                 }
               })(),
               CLIPBOARD_RESTORE_MAX_MS,
               'clipboard restore timeout',
             );
           } catch {
-            // ignore restore timeout
+            /* ignore */
           }
           clipboardRestoreMs = Date.now() - restoreStartAt;
 
-          console.log(
-            `[perf] resolve_window_ms=${resolveWindowMs} paste_attempt_ms=${pasteAttemptMs} clipboard_restore_ms=${clipboardRestoreMs}`,
-          );
+          recordAttemptResult(appKey, usedAttempt, pasted);
+          logPerf('text injection completed', {
+            appKey,
+            method: usedAttempt,
+            resolveWindowMs,
+            pasteAttemptMs,
+            clipboardRestoreMs,
+            restored,
+          });
 
           return {
             pasted,
             restored,
-            metrics: {
-              resolveWindowMs,
-              pasteAttemptMs,
-              clipboardRestoreMs,
-            },
+            metrics: { resolveWindowMs, pasteAttemptMs, clipboardRestoreMs },
           };
         })(),
         CLIPBOARD_TX_TIMEOUT_MS,
         'clipboard transaction timeout',
-      ).catch(() => ({
-        pasted: false,
-        restored: false,
-        skippedReason: 'TIMEOUT' as const,
-        metrics: {
-          resolveWindowMs: 0,
-          pasteAttemptMs: 0,
-          clipboardRestoreMs: 0,
-        },
-      })),
+      ).catch(() => {
+        recordAttemptResult(null, null, false, 'TIMEOUT');
+        return {
+          pasted: false,
+          restored: false,
+          skippedReason: 'TIMEOUT' as const,
+          metrics: { resolveWindowMs: 0, pasteAttemptMs: 0, clipboardRestoreMs: 0 },
+        };
+      }),
     );
   }
 
   return {
     getForegroundWindowHandle,
+    getWindowAppKey: resolveWindowAppKey,
     resolveInjectionTargetWindowHandle,
     injectText,
+    getRecentInjectionStats: () => recentInjectionStats,
   };
 }
 

@@ -8,6 +8,7 @@ export type HistoryEntry = {
   id: string;
   sessionId: string;
   text: string;
+  rawText?: string;
   pasted: boolean;
   skippedReason?: HistorySkipReason;
   retryCount: number;
@@ -16,6 +17,12 @@ export type HistoryEntry = {
   resolveWindowMs?: number;
   pasteAttemptMs?: number;
   clipboardRestoreMs?: number;
+  languageChosen?: string;
+  appliedRules?: string[];
+  confidenceSummary?: {
+    best?: number;
+    mode?: string;
+  };
   createdAt: string;
 };
 
@@ -28,6 +35,7 @@ export type HistoryListParams = {
 export type HistoryAppendInput = {
   sessionId: string;
   text: string;
+  rawText?: string;
   pasted: boolean;
   skippedReason?: HistorySkipReason;
   retryCount: number;
@@ -36,7 +44,19 @@ export type HistoryAppendInput = {
   resolveWindowMs?: number;
   pasteAttemptMs?: number;
   clipboardRestoreMs?: number;
+  languageChosen?: string;
+  appliedRules?: string[];
+  confidenceSummary?: {
+    best?: number;
+    mode?: string;
+  };
   createdAt?: string;
+};
+
+type HistoryCodec = {
+  isEncryptionAvailable?: () => boolean;
+  encryptString?: (value: string) => string;
+  decryptString?: (value: string) => string;
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number) {
@@ -60,6 +80,23 @@ function parseOptionalNumber(value: unknown) {
     if (Number.isFinite(parsed)) return Math.round(parsed);
   }
   return undefined;
+}
+
+function parseOptionalString(value: unknown, maxLength: number) {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.slice(0, maxLength);
+}
+
+function parseStringList(value: unknown, maxItems: number, maxLength: number) {
+  if (!Array.isArray(value)) return undefined;
+  return value
+    .filter((entry): entry is string => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, maxItems)
+    .map((entry) => entry.slice(0, maxLength));
 }
 
 function parseHistoryEntry(raw: unknown): HistoryEntry | null {
@@ -86,6 +123,7 @@ function parseHistoryEntry(raw: unknown): HistoryEntry | null {
     id,
     sessionId,
     text,
+    rawText: parseOptionalString(item.rawText, 20000),
     pasted: item.pasted === true,
     skippedReason,
     retryCount: clampInt(item.retryCount, 0, 5, 0),
@@ -94,6 +132,15 @@ function parseHistoryEntry(raw: unknown): HistoryEntry | null {
     resolveWindowMs: parseOptionalNumber(item.resolveWindowMs),
     pasteAttemptMs: parseOptionalNumber(item.pasteAttemptMs),
     clipboardRestoreMs: parseOptionalNumber(item.clipboardRestoreMs),
+    languageChosen: parseOptionalString(item.languageChosen, 24),
+    appliedRules: parseStringList(item.appliedRules, 40, 80),
+    confidenceSummary:
+      item.confidenceSummary && typeof item.confidenceSummary === 'object'
+        ? {
+            best: parseOptionalNumber((item.confidenceSummary as { best?: unknown }).best),
+            mode: parseOptionalString((item.confidenceSummary as { mode?: unknown }).mode, 40),
+          }
+        : undefined,
     createdAt,
   };
 }
@@ -109,9 +156,11 @@ function sortNewestFirst(entries: HistoryEntry[]) {
 
 export class HistoryStore {
   private readonly filePath: string;
+  private readonly codec?: HistoryCodec;
 
-  constructor(filePath: string) {
+  constructor(filePath: string, codec?: HistoryCodec) {
     this.filePath = filePath;
+    this.codec = codec;
   }
 
   async list(params: HistoryListParams = {}): Promise<HistoryEntry[]> {
@@ -134,6 +183,8 @@ export class HistoryStore {
       id: randomUUID(),
       sessionId: input.sessionId.trim(),
       text,
+      // Preserve compatibility on read, but do not persist raw transcripts anymore.
+      rawText: undefined,
       pasted: input.pasted === true,
       skippedReason: input.skippedReason,
       retryCount: clampInt(input.retryCount, 0, 5, 0),
@@ -142,6 +193,14 @@ export class HistoryStore {
       resolveWindowMs: parseOptionalNumber(input.resolveWindowMs),
       pasteAttemptMs: parseOptionalNumber(input.pasteAttemptMs),
       clipboardRestoreMs: parseOptionalNumber(input.clipboardRestoreMs),
+      languageChosen: parseOptionalString(input.languageChosen, 24),
+      appliedRules: parseStringList(input.appliedRules, 40, 80),
+      confidenceSummary: input.confidenceSummary
+        ? {
+            best: parseOptionalNumber(input.confidenceSummary.best),
+            mode: parseOptionalString(input.confidenceSummary.mode, 40),
+          }
+        : undefined,
       createdAt:
         input.createdAt && input.createdAt.trim() ? input.createdAt : new Date().toISOString(),
     };
@@ -198,7 +257,7 @@ export class HistoryStore {
   private async loadRaw(): Promise<HistoryEntry[]> {
     try {
       const content = await readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(content);
+      const parsed = JSON.parse(this.decodeContent(content));
       if (!Array.isArray(parsed)) {
         await this.persist([]);
         return [];
@@ -229,6 +288,25 @@ export class HistoryStore {
 
   private async persist(entries: HistoryEntry[]): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(sortNewestFirst(entries), null, 2), 'utf8');
+    const serialized = JSON.stringify(sortNewestFirst(entries), null, 2);
+    await writeFile(this.filePath, this.encodeContent(serialized), 'utf8');
+  }
+
+  private decodeContent(content: string) {
+    if (!this.codec?.decryptString) return content;
+    try {
+      return this.codec.decryptString(content);
+    } catch {
+      return content;
+    }
+  }
+
+  private encodeContent(content: string) {
+    if (!this.codec?.encryptString || !this.codec.isEncryptionAvailable?.()) return content;
+    try {
+      return this.codec.encryptString(content);
+    } catch {
+      return content;
+    }
   }
 }

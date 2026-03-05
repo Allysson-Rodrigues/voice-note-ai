@@ -20,7 +20,7 @@ export type RuntimeInfo = {
 
 export type HealthStatus = 'ok' | 'warn' | 'error';
 export type HealthCheckItem = {
-  id: 'azure' | 'network' | 'hook';
+  id: 'stt' | 'network' | 'hook' | 'history' | 'phrases' | 'injection' | 'security';
   status: HealthStatus;
   message: string;
 };
@@ -33,6 +33,15 @@ export type CanonicalTerm = {
   from: string;
   to: string;
   enabled: boolean;
+  scope?: 'global' | 'app' | 'language';
+  appKeys?: string[];
+  confidencePolicy?: 'always' | 'safe-only';
+};
+
+export type AppProfile = {
+  injectionMethod?: 'target-handle' | 'foreground-handle' | 'ctrl-v' | 'shift-insert';
+  languageBias?: 'pt-BR' | 'en-US' | 'mixed';
+  postprocessProfile?: 'safe' | 'balanced' | 'aggressive';
 };
 
 export type HistorySkipReason = 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
@@ -41,6 +50,7 @@ export type HistoryEntry = {
   id: string;
   sessionId: string;
   text: string;
+  rawText?: string;
   pasted: boolean;
   skippedReason?: HistorySkipReason;
   retryCount: number;
@@ -49,13 +59,40 @@ export type HistoryEntry = {
   resolveWindowMs?: number;
   pasteAttemptMs?: number;
   clipboardRestoreMs?: number;
+  languageChosen?: string;
+  appliedRules?: string[];
+  confidenceSummary?: {
+    best?: number;
+    mode?: string;
+  };
   createdAt: string;
+};
+
+export type PerfSummary = {
+  sampleCount: number;
+  averages: {
+    pttToFirstPartialMs: number;
+    pttToFinalMs: number;
+    injectTotalMs: number;
+    sessionDurationMs: number;
+  };
+  skipCounts: Record<'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT', number>;
 };
 
 declare global {
   interface Window {
     voiceNoteAI: {
+      windowMinimize: () => void;
+      windowMaximize: () => void;
+      windowClose: () => void;
+      isWindowMaximized: () => Promise<boolean>;
+      onMaximizedChange: (cb: (isMaximized: boolean) => void) => () => void;
       listDictionary: () => Promise<DictionaryTerm[]>;
+      exportDictionary: () => Promise<{ exportedAt: string; terms: DictionaryTerm[] }>;
+      importDictionary: (payload: {
+        terms: DictionaryTerm[];
+        mode?: 'replace' | 'merge';
+      }) => Promise<{ ok: boolean; count: number }>;
       addDictionaryTerm: (payload: {
         term: string;
         hintPt?: string;
@@ -81,6 +118,7 @@ declare global {
         autoPasteEnabled: boolean;
         toneMode: 'formal' | 'casual' | 'very-casual';
         languageMode: 'pt-BR' | 'en-US' | 'dual';
+        sttProvider: 'azure';
         extraPhrases: string[];
         canonicalTerms: CanonicalTerm[];
         stopGraceMs: number;
@@ -88,15 +126,30 @@ declare global {
         maxSessionSeconds: number;
         historyEnabled: boolean;
         historyRetentionDays: number;
+        privacyMode: boolean;
+        historyStorageMode: 'plain' | 'encrypted';
+        postprocessProfile: 'safe' | 'balanced' | 'aggressive';
+        dualLanguageStrategy: 'parallel' | 'fallback-on-low-confidence';
+        appProfiles: Record<string, AppProfile>;
       }>;
       getRuntimeInfo: () => Promise<RuntimeInfo>;
       getHealthCheck: () => Promise<HealthCheckReport>;
+      getPerfSummary: () => Promise<PerfSummary>;
+      getRecentLogs: (params?: { limit?: number }) => Promise<
+        Array<{
+          level: 'info' | 'warn' | 'error' | 'perf';
+          message: string;
+          timestamp: string;
+          context?: Record<string, unknown>;
+        }>
+      >;
       retryHoldHook: () => Promise<{ ok: boolean; message: string }>;
       updateSettings: (
         partial: Partial<{
           autoPasteEnabled: boolean;
           toneMode: 'formal' | 'casual' | 'very-casual';
           languageMode: 'pt-BR' | 'en-US' | 'dual';
+          sttProvider: 'azure';
           extraPhrases: string[];
           canonicalTerms: CanonicalTerm[];
           stopGraceMs: number;
@@ -104,6 +157,11 @@ declare global {
           maxSessionSeconds: number;
           historyEnabled: boolean;
           historyRetentionDays: number;
+          privacyMode: boolean;
+          historyStorageMode: 'plain' | 'encrypted';
+          postprocessProfile: 'safe' | 'balanced' | 'aggressive';
+          dualLanguageStrategy: 'parallel' | 'fallback-on-low-confidence';
+          appProfiles: Record<string, AppProfile>;
         }>,
       ) => Promise<{ ok: boolean; settings?: unknown }>;
       setAutoPasteEnabled: (enabled: boolean) => Promise<{ ok: boolean }>;

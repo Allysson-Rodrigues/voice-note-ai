@@ -184,6 +184,22 @@ export class DictionaryStore {
     return dedupeCaseInsensitive([...extraValues, ...terms]);
   }
 
+  async export(): Promise<{ exportedAt: string; terms: DictionaryTerm[] }> {
+    const terms = await this.list();
+    return {
+      exportedAt: new Date().toISOString(),
+      terms,
+    };
+  }
+
+  async import(payload: { terms: DictionaryTerm[]; mode?: 'replace' | 'merge' }) {
+    const nextTerms = parseDictionary(payload.terms);
+    const current = payload.mode === 'replace' ? [] : await this.loadRaw();
+    const merged = parseDictionary([...current, ...nextTerms]);
+    await this.persist(merged);
+    return { ok: true, count: merged.length };
+  }
+
   private async loadRaw(): Promise<DictionaryTerm[]> {
     try {
       const content = await readFile(this.filePath, 'utf8');

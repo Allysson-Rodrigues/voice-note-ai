@@ -3,18 +3,32 @@ import path from 'node:path';
 
 export type ToneMode = 'formal' | 'casual' | 'very-casual';
 export type LanguageMode = 'pt-BR' | 'en-US' | 'dual';
+export type SttProvider = 'azure';
+export type HistoryStorageMode = 'plain' | 'encrypted';
+export type PostprocessProfile = 'safe' | 'balanced' | 'aggressive';
+export type DualLanguageStrategy = 'parallel' | 'fallback-on-low-confidence';
 export type CanonicalTerm = {
   from: string;
   to: string;
   enabled: boolean;
+  scope?: 'global' | 'app' | 'language';
+  appKeys?: string[];
+  confidencePolicy?: 'always' | 'safe-only';
 };
 export type InjectionMethod = 'target-handle' | 'foreground-handle' | 'ctrl-v' | 'shift-insert';
 export type InjectionProfiles = Record<string, InjectionMethod>;
+export type AppProfile = {
+  injectionMethod?: InjectionMethod;
+  languageBias?: 'pt-BR' | 'en-US' | 'mixed';
+  postprocessProfile?: PostprocessProfile;
+};
+export type AppProfiles = Record<string, AppProfile>;
 
 export type AppSettings = {
   autoPasteEnabled: boolean;
   toneMode: ToneMode;
   languageMode: LanguageMode;
+  sttProvider: SttProvider;
   extraPhrases: string[];
   canonicalTerms: CanonicalTerm[];
   stopGraceMs: number;
@@ -23,6 +37,11 @@ export type AppSettings = {
   historyEnabled: boolean;
   historyRetentionDays: number;
   injectionProfiles: InjectionProfiles;
+  privacyMode: boolean;
+  historyStorageMode: HistoryStorageMode;
+  postprocessProfile: PostprocessProfile;
+  dualLanguageStrategy: DualLanguageStrategy;
+  appProfiles: AppProfiles;
 };
 
 export const DEFAULT_CANONICAL_TERMS: CanonicalTerm[] = [
@@ -36,6 +55,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoPasteEnabled: false,
   toneMode: 'casual',
   languageMode: 'pt-BR',
+  sttProvider: 'azure',
   extraPhrases: [],
   canonicalTerms: DEFAULT_CANONICAL_TERMS,
   stopGraceMs: 200,
@@ -44,6 +64,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   historyEnabled: true,
   historyRetentionDays: 30,
   injectionProfiles: {},
+  privacyMode: false,
+  historyStorageMode: 'plain',
+  postprocessProfile: 'balanced',
+  dualLanguageStrategy: 'fallback-on-low-confidence',
+  appProfiles: {},
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number) {
@@ -92,6 +117,22 @@ function parseCanonicalTerms(raw: unknown): CanonicalTerm[] {
       from,
       to,
       enabled: (item as { enabled?: unknown }).enabled !== false,
+      scope:
+        (item as { scope?: unknown }).scope === 'app' ||
+        (item as { scope?: unknown }).scope === 'language'
+          ? ((item as { scope: CanonicalTerm['scope'] }).scope ?? 'global')
+          : 'global',
+      appKeys: Array.isArray((item as { appKeys?: unknown }).appKeys)
+        ? ((item as { appKeys: unknown[] }).appKeys ?? [])
+            .filter((entry): entry is string => typeof entry === 'string')
+            .map((entry) => normalizePhrase(entry).toLocaleLowerCase())
+            .filter(Boolean)
+            .slice(0, 20)
+        : undefined,
+      confidencePolicy:
+        (item as { confidencePolicy?: unknown }).confidencePolicy === 'safe-only'
+          ? 'safe-only'
+          : 'always',
     });
   }
   return out;
@@ -125,6 +166,34 @@ function parseInjectionProfiles(raw: unknown): InjectionProfiles {
   return out;
 }
 
+function parseSttProvider(value: unknown): SttProvider {
+  return 'azure';
+}
+
+function parseAppProfiles(raw: unknown): AppProfiles {
+  if (!raw || typeof raw !== 'object') return {};
+  const input = raw as Record<string, unknown>;
+  const out: AppProfiles = {};
+  for (const [key, value] of Object.entries(input)) {
+    const appKey = normalizePhrase(key).toLocaleLowerCase();
+    if (!appKey || !value || typeof value !== 'object') continue;
+    const item = value as Record<string, unknown>;
+    const injectionMethod = parseInjectionMethod(item.injectionMethod);
+    const languageBias =
+      item.languageBias === 'pt-BR' || item.languageBias === 'en-US' || item.languageBias === 'mixed'
+        ? item.languageBias
+        : undefined;
+    const postprocessProfile =
+      item.postprocessProfile === 'safe' ||
+      item.postprocessProfile === 'balanced' ||
+      item.postprocessProfile === 'aggressive'
+        ? item.postprocessProfile
+        : undefined;
+    out[appKey] = { injectionMethod: injectionMethod ?? undefined, languageBias, postprocessProfile };
+  }
+  return out;
+}
+
 function parseSettings(raw: unknown): AppSettings {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS };
   const obj = raw as Partial<AppSettings>;
@@ -137,11 +206,22 @@ function parseSettings(raw: unknown): AppSettings {
         : 'casual';
   const languageMode: LanguageMode =
     obj.languageMode === 'en-US' ? 'en-US' : obj.languageMode === 'dual' ? 'dual' : 'pt-BR';
+  const historyStorageMode: HistoryStorageMode =
+    obj.historyStorageMode === 'encrypted' ? 'encrypted' : 'plain';
+  const postprocessProfile: PostprocessProfile =
+    obj.postprocessProfile === 'safe'
+      ? 'safe'
+      : obj.postprocessProfile === 'aggressive'
+        ? 'aggressive'
+        : 'balanced';
+  const dualLanguageStrategy: DualLanguageStrategy =
+    obj.dualLanguageStrategy === 'parallel' ? 'parallel' : 'fallback-on-low-confidence';
 
   return {
     autoPasteEnabled: obj.autoPasteEnabled === true,
     toneMode,
     languageMode,
+    sttProvider: parseSttProvider(obj.sttProvider),
     extraPhrases: parsePhrases(obj.extraPhrases),
     canonicalTerms: parseCanonicalTerms(obj.canonicalTerms),
     stopGraceMs: clampInt(obj.stopGraceMs, 0, 2000, DEFAULT_SETTINGS.stopGraceMs),
@@ -155,6 +235,11 @@ function parseSettings(raw: unknown): AppSettings {
       DEFAULT_SETTINGS.historyRetentionDays,
     ),
     injectionProfiles: parseInjectionProfiles(obj.injectionProfiles),
+    privacyMode: obj.privacyMode === true,
+    historyStorageMode,
+    postprocessProfile,
+    dualLanguageStrategy,
+    appProfiles: parseAppProfiles(obj.appProfiles),
   };
 }
 
@@ -174,7 +259,7 @@ export class SettingsStore {
   async load(): Promise<AppSettings> {
     try {
       const content = await readFile(this.filePath, 'utf8');
-      const parsed = parseSettings(JSON.parse(content));
+      const parsed = parseSettings({ ...this.cached, ...JSON.parse(content) });
       this.cached = parsed;
       // Self-heal any malformed file on read.
       await this.persist(parsed);

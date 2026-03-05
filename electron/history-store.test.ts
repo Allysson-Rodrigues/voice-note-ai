@@ -125,4 +125,50 @@ describe('history store', () => {
     const content = await readFile(filePath, 'utf8');
     expect(content.trim()).toBe('[]');
   });
+
+  it('does not persist raw transcripts for new entries', async () => {
+    const { store, filePath } = await createStore();
+
+    await store.append(
+      {
+        sessionId: 'secure',
+        text: 'texto final',
+        rawText: 'texto bruto sensivel',
+        pasted: true,
+        retryCount: 0,
+        sessionDurationMs: 1200,
+        injectTotalMs: 120,
+      },
+      30,
+    );
+
+    const persisted = await readFile(filePath, 'utf8');
+    expect(persisted).toContain('"text": "texto final"');
+    expect(persisted).not.toContain('texto bruto sensivel');
+    expect((await store.list())[0]?.rawText).toBeUndefined();
+  });
+
+  it('preserves compatibility when loading legacy rawText entries', async () => {
+    const { store, filePath } = await createStore();
+    await writeFile(
+      filePath,
+      JSON.stringify([
+        {
+          id: 'legacy-1',
+          sessionId: 'legacy',
+          text: 'texto final',
+          rawText: 'texto bruto legado',
+          pasted: false,
+          retryCount: 0,
+          sessionDurationMs: 500,
+          injectTotalMs: 50,
+          createdAt: '2026-03-05T00:00:00.000Z',
+        },
+      ]),
+      'utf8',
+    );
+
+    const entries = await store.list();
+    expect(entries[0]?.rawText).toBe('texto bruto legado');
+  });
 });

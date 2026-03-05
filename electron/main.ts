@@ -1,29 +1,51 @@
-import { app, BrowserWindow, Menu, Tray, globalShortcut, ipcMain, screen } from 'electron';
+import dotenv from 'dotenv';
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  safeStorage,
+  screen,
+  session,
+  Tray,
+} from 'electron';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import dotenv from 'dotenv';
 import { DictionaryStore } from './dictionary-store.js';
 import { HistoryStore } from './history-store.js';
+import type { PasteAttempt } from './injection-plan.js';
 import {
-  DEFAULT_CANONICAL_TERMS,
-  SettingsStore,
-  type AppSettings,
-  type InjectionMethod,
-  type ToneMode,
-} from './settings-store.js';
-import { applyTranscriptPostprocess } from './transcript-postprocess.js';
-import { createMainWindow, applyMainWindowBounds } from './modules/main-window.js';
-import { createHudWindowController } from './modules/hud-window.js';
+  validateAutoPastePayload,
+  validateDictionaryAddPayload,
+  validateDictionaryUpdatePayload,
+  validateHistoryClearPayload,
+  validateHistoryListPayload,
+  validateIdPayload,
+  validateSettingsUpdate,
+  validateTonePayload,
+} from './ipc-validation.js';
+import { getRecentLogs, logError, logInfo } from './logger.js';
 import {
   AZURE_CONFIG_MISSING_MESSAGE,
   getAzureConfigError,
   getHealthCheckReport,
 } from './modules/health-check.js';
-import { createTextInjectionService } from './modules/text-injection.js';
-import { createSttSessionManager } from './modules/stt-session.js';
 import { createHotkeyService } from './modules/hotkey.js';
-import type { PasteAttempt } from './injection-plan.js';
+import { createHudWindowController } from './modules/hud-window.js';
+import { applyMainWindowBounds, createMainWindow } from './modules/main-window.js';
+import { createSttSessionManager } from './modules/stt-session.js';
+import { createTextInjectionService } from './modules/text-injection.js';
+import { installSessionSecurity } from './modules/window-security.js';
+import { PerfStore } from './perf-store.js';
+import {
+  DEFAULT_CANONICAL_TERMS,
+  SettingsStore,
+  type AppSettings,
+  type InjectionMethod,
+} from './settings-store.js';
+import { applyTranscriptPostprocess } from './transcript-postprocess.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,8 +82,14 @@ let tray: Tray | null = null;
 let settingsStore: SettingsStore | null = null;
 let dictionaryStore: DictionaryStore | null = null;
 let historyStore: HistoryStore | null = null;
+let perfStore: PerfStore | null = null;
 let isQuitting = false;
 let displayListenersAttached = false;
+let runtimeSecurity = {
+  cspEnabled: false,
+  permissionsPolicy: 'default-deny' as const,
+  trustedOrigins: ['file://'],
+};
 
 function parseBooleanEnv(value: string | undefined) {
   if (value == null) return undefined;
@@ -69,6 +97,13 @@ function parseBooleanEnv(value: string | undefined) {
   if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
   if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
   return undefined;
+}
+
+function resolveDefaultHistoryStorageMode() {
+  const explicit = process.env.VOICE_HISTORY_STORAGE_MODE?.trim().toLowerCase();
+  if (explicit === 'encrypted') return 'encrypted' as const;
+  if (explicit === 'plain') return 'plain' as const;
+  return safeStorage.isEncryptionAvailable() ? ('encrypted' as const) : ('plain' as const);
 }
 
 let settings: AppSettings = {
@@ -80,6 +115,7 @@ let settings: AppSettings = {
         ? 'very-casual'
         : 'casual',
   languageMode: (process.env.AZURE_SPEECH_LANGUAGE ?? 'pt-BR') === 'en-US' ? 'en-US' : 'pt-BR',
+  sttProvider: 'azure',
   extraPhrases: [],
   canonicalTerms: [...DEFAULT_CANONICAL_TERMS],
   stopGraceMs: Number(process.env.VOICE_STOP_GRACE_MS ?? '200') || 200,
@@ -88,6 +124,19 @@ let settings: AppSettings = {
   historyEnabled: parseBooleanEnv(process.env.VOICE_HISTORY_ENABLED) ?? true,
   historyRetentionDays: Number(process.env.VOICE_HISTORY_RETENTION_DAYS ?? '30') || 30,
   injectionProfiles: {},
+  privacyMode: parseBooleanEnv(process.env.VOICE_PRIVACY_MODE) ?? false,
+  historyStorageMode: resolveDefaultHistoryStorageMode(),
+  postprocessProfile:
+    (process.env.VOICE_POSTPROCESS_PROFILE ?? 'balanced') === 'safe'
+      ? 'safe'
+      : (process.env.VOICE_POSTPROCESS_PROFILE ?? 'balanced') === 'aggressive'
+        ? 'aggressive'
+        : 'balanced',
+  dualLanguageStrategy:
+    (process.env.VOICE_DUAL_LANGUAGE_STRATEGY ?? 'fallback-on-low-confidence') === 'parallel'
+      ? 'parallel'
+      : 'fallback-on-low-confidence',
+  appProfiles: {},
 };
 
 let runtimeInfo: RuntimeInfo = {
@@ -106,9 +155,21 @@ function getDictionaryStore() {
 
 function getHistoryStore() {
   if (!historyStore) {
-    historyStore = new HistoryStore(path.join(app.getPath('userData'), 'history.json'));
+    historyStore = new HistoryStore(path.join(app.getPath('userData'), 'history.json'), {
+      isEncryptionAvailable: () =>
+        settings.historyStorageMode === 'encrypted' && safeStorage.isEncryptionAvailable(),
+      encryptString: (value) => safeStorage.encryptString(value).toString('base64'),
+      decryptString: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')),
+    });
   }
   return historyStore;
+}
+
+function getPerfStore() {
+  if (!perfStore) {
+    perfStore = new PerfStore(path.join(app.getPath('userData'), 'perf.json'));
+  }
+  return perfStore;
 }
 
 const hudController = createHudWindowController({
@@ -167,6 +228,7 @@ function setRuntimeBlocked(reason?: string) {
 function resolveCaptureBlockedReason() {
   const existing = runtimeInfo.captureBlockedReason;
   if (existing && existing !== AZURE_CONFIG_MISSING_MESSAGE) return existing;
+
   return getAzureConfigError();
 }
 
@@ -230,6 +292,8 @@ function detachDisplayListeners() {
 function getPreferredInjectionMethod(appKey: string | null): PasteAttempt | null {
   if (!appKey) return null;
   const key = appKey.toLowerCase();
+  const profileMethod = settings.appProfiles?.[key]?.injectionMethod;
+  if (profileMethod) return profileMethod;
   const method = settings.injectionProfiles?.[key];
   if (!method) return null;
   return method as PasteAttempt;
@@ -256,12 +320,14 @@ const textInjectionService = createTextInjectionService({
   rememberInjectionMethod,
 });
 
-function postprocessTranscript(rawText: string) {
-  return applyTranscriptPostprocess(rawText, {
+async function postprocessTranscript(rawText: string) {
+  const base = applyTranscriptPostprocess(rawText, {
     toneMode: settings.toneMode,
     canonicalTerms: settings.canonicalTerms,
     formatCommandsEnabled: settings.formatCommandsEnabled,
+    profile: settings.postprocessProfile,
   });
+  return base;
 }
 
 const sttManager = createSttSessionManager({
@@ -273,15 +339,30 @@ const sttManager = createSttSessionManager({
   postprocessTranscript,
   getMainWindow: () => mainWindow,
   getForegroundWindowHandle: textInjectionService.getForegroundWindowHandle,
+  getWindowAppKey: textInjectionService.getWindowAppKey,
   resolveInjectionTargetWindowHandle: textInjectionService.resolveInjectionTargetWindowHandle,
   injectText: textInjectionService.injectText,
   getDictionaryPhrases: async (seedPhrases) => {
     return await getDictionaryStore().activePhrases(seedPhrases);
   },
   onSessionCompleted: async (entry) => {
-    if (!settings.historyEnabled) return;
+    await getPerfStore().append({
+      sessionId: entry.sessionId,
+      createdAt: new Date().toISOString(),
+      pttToFirstPartialMs: entry.pttToFirstPartialMs,
+      pttToFinalMs: entry.pttToFinalMs,
+      injectTotalMs: entry.injectTotalMs,
+      resolveWindowMs: entry.resolveWindowMs,
+      pasteAttemptMs: entry.pasteAttemptMs,
+      clipboardRestoreMs: entry.clipboardRestoreMs,
+      retryCount: entry.retryCount,
+      sessionDurationMs: entry.sessionDurationMs,
+      skippedReason: entry.skippedReason,
+    });
+    if (!settings.historyEnabled || settings.privacyMode) return;
     await getHistoryStore().append(entry, settings.historyRetentionDays);
   },
+  getAppProfile: (appKey) => settings.appProfiles?.[appKey ?? ''],
 });
 
 const hotkeyService = createHotkeyService({
@@ -339,6 +420,14 @@ ipcMain.handle('app:health-check', async () => {
   return await getHealthCheckReport({
     holdToTalkEnabled: HOLD_TO_TALK_ENABLED,
     holdHookActive: Boolean(hotkeyService.getStopHoldHook()),
+    perfSummary: await getPerfStore().getSummary(),
+    recentInjection: textInjectionService.getRecentInjectionStats(),
+    historyEnabled: settings.historyEnabled,
+    privacyMode: settings.privacyMode,
+    historyStorageMode: settings.historyStorageMode,
+    isEncryptionAvailable: safeStorage.isEncryptionAvailable(),
+    phraseBoostCount: await sttManager.getPhraseBoostCount(),
+    runtimeSecurity,
   });
 });
 
@@ -346,44 +435,38 @@ ipcMain.handle('app:retry-hold-hook', async () => {
   return await hotkeyService.retryHoldHook();
 });
 
-ipcMain.handle(
-  'settings:update',
-  async (
-    _event,
-    partial: Partial<
-      Pick<
-        AppSettings,
-        | 'autoPasteEnabled'
-        | 'toneMode'
-        | 'languageMode'
-        | 'extraPhrases'
-        | 'canonicalTerms'
-        | 'stopGraceMs'
-        | 'formatCommandsEnabled'
-        | 'maxSessionSeconds'
-        | 'historyEnabled'
-        | 'historyRetentionDays'
-      >
-    >,
-  ) => {
-    if (!settingsStore) return { ok: false };
-    settings = await settingsStore.update(partial as Partial<AppSettings>);
-    if ('historyRetentionDays' in partial || 'historyEnabled' in partial) {
-      await getHistoryStore().prune(settings.historyRetentionDays);
-    }
-    sttManager.markPhraseCacheDirty();
-    return { ok: true, settings };
-  },
-);
+ipcMain.handle('app:perf-summary', async () => {
+  return await getPerfStore().getSummary();
+});
 
-ipcMain.handle('settings:autoPaste', async (_event, { enabled }: { enabled: boolean }) => {
+ipcMain.handle('app:logs:recent', async (_event, payload?: { limit?: number }) => {
+  return getRecentLogs(payload?.limit ?? 50);
+});
+
+ipcMain.handle('settings:update', async (_event, payload: unknown) => {
   if (!settingsStore) return { ok: false };
+  const partial = validateSettingsUpdate(payload);
+  settings = await settingsStore.update(partial as Partial<AppSettings>);
+  if ('historyRetentionDays' in partial || 'historyEnabled' in partial) {
+    await getHistoryStore().prune(settings.historyRetentionDays);
+  }
+  sttManager.markPhraseCacheDirty();
+  if ('sttProvider' in partial) {
+    refreshCaptureBlockedReason();
+  }
+  return { ok: true, settings };
+});
+
+ipcMain.handle('settings:autoPaste', async (_event, payload: unknown) => {
+  if (!settingsStore) return { ok: false };
+  const { enabled } = validateAutoPastePayload(payload);
   settings = await settingsStore.update({ autoPasteEnabled: enabled });
   return { ok: true };
 });
 
-ipcMain.handle('settings:tone', async (_event, { mode }: { mode: ToneMode }) => {
+ipcMain.handle('settings:tone', async (_event, payload: unknown) => {
   if (!settingsStore) return { ok: false };
+  const { mode } = validateTonePayload(payload);
   settings = await settingsStore.update({
     toneMode: mode === 'formal' ? 'formal' : mode === 'very-casual' ? 'very-casual' : 'casual',
   });
@@ -394,40 +477,53 @@ ipcMain.handle('dictionary:list', async () => {
   return getDictionaryStore().list();
 });
 
-ipcMain.handle('dictionary:add', async (_event, payload: { term: string; hintPt?: string }) => {
-  const term = await getDictionaryStore().add(payload);
+ipcMain.handle('dictionary:export', async () => {
+  return await getDictionaryStore().export();
+});
+
+ipcMain.handle(
+  'dictionary:import',
+  async (_event, payload: { terms: unknown[]; mode?: 'replace' | 'merge' }) => {
+    const terms = Array.isArray(payload?.terms) ? payload.terms : [];
+    const mode = payload?.mode === 'replace' ? 'replace' : 'merge';
+    const result = await getDictionaryStore().import({ terms: terms as never, mode });
+    sttManager.markPhraseCacheDirty();
+    return result;
+  },
+);
+
+ipcMain.handle('dictionary:add', async (_event, payload: unknown) => {
+  const validPayload = validateDictionaryAddPayload(payload);
+  const term = await getDictionaryStore().add(validPayload);
   sttManager.markPhraseCacheDirty();
   return { ok: true, term };
 });
 
-ipcMain.handle(
-  'dictionary:update',
-  async (_event, payload: { id: string; term?: string; hintPt?: string; enabled?: boolean }) => {
-    const term = await getDictionaryStore().update(payload);
-    sttManager.markPhraseCacheDirty();
-    return { ok: true, term };
-  },
-);
+ipcMain.handle('dictionary:update', async (_event, payload: unknown) => {
+  const validPayload = validateDictionaryUpdatePayload(payload);
+  const term = await getDictionaryStore().update(validPayload);
+  sttManager.markPhraseCacheDirty();
+  return { ok: true, term };
+});
 
-ipcMain.handle('dictionary:remove', async (_event, payload: { id: string }) => {
-  const result = await getDictionaryStore().remove(payload.id);
+ipcMain.handle('dictionary:remove', async (_event, payload: unknown) => {
+  const { id } = validateIdPayload(payload, 'dictionary:remove');
+  const result = await getDictionaryStore().remove(id);
   sttManager.markPhraseCacheDirty();
   return result;
 });
 
-ipcMain.handle(
-  'history:list',
-  async (_event, payload?: { query?: string; limit?: number; offset?: number }) => {
-    return await getHistoryStore().list(payload ?? {});
-  },
-);
-
-ipcMain.handle('history:remove', async (_event, payload: { id: string }) => {
-  return await getHistoryStore().remove(payload.id);
+ipcMain.handle('history:list', async (_event, payload?: unknown) => {
+  return await getHistoryStore().list(validateHistoryListPayload(payload));
 });
 
-ipcMain.handle('history:clear', async (_event, payload?: { before?: string }) => {
-  return await getHistoryStore().clear(payload ?? {});
+ipcMain.handle('history:remove', async (_event, payload: unknown) => {
+  const { id } = validateIdPayload(payload, 'history:remove');
+  return await getHistoryStore().remove(id);
+});
+
+ipcMain.handle('history:clear', async (_event, payload?: unknown) => {
+  return await getHistoryStore().clear(validateHistoryClearPayload(payload));
 });
 
 sttManager.registerIpcHandlers(ipcMain);
@@ -501,6 +597,8 @@ async function bootstrap() {
     app.setAppUserModelId('com.antigravity.voice-note-ai');
   }
 
+  runtimeSecurity = installSessionSecurity(session.defaultSession, DEV_SERVER_URL);
+
   if (IS_DEV) {
     const devUserData = path.join(app.getPath('appData'), 'voice-note-ai-dev');
     app.setPath('userData', devUserData);
@@ -509,10 +607,17 @@ async function bootstrap() {
   settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'), settings);
   settings = await settingsStore.load();
   await getHistoryStore().prune(settings.historyRetentionDays);
+  void getPerfStore();
 
   sttManager.markPhraseCacheDirty();
   void sttManager.prewarmStt();
   refreshCaptureBlockedReason();
+  logInfo('application bootstrapping', {
+    isDev: IS_DEV,
+    holdToTalk: HOLD_TO_TALK_ENABLED,
+    privacyMode: settings.privacyMode,
+    historyStorageMode: settings.historyStorageMode,
+  });
 
   mainWindow = await createMainWindow({
     devServerUrl: DEV_SERVER_URL,
@@ -522,6 +627,18 @@ async function bootstrap() {
     isQuitting: () => isQuitting,
     getPreferredDisplay,
   });
+
+  // Frameless window controls
+  ipcMain.on('window:minimize', () => mainWindow?.minimize());
+  ipcMain.on('window:maximize', () => {
+    if (mainWindow?.isMaximized()) mainWindow.unmaximize();
+    else mainWindow?.maximize();
+  });
+  ipcMain.on('window:close', () => mainWindow?.close());
+  ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false);
+  mainWindow.on('maximize', () => mainWindow?.webContents.send('window:maximized-change', true));
+  mainWindow.on('unmaximize', () => mainWindow?.webContents.send('window:maximized-change', false));
+
   await hudController.createHudWindow();
   ensureTray();
   attachDisplayListeners();
@@ -589,7 +706,9 @@ app
     await bootstrap();
   })
   .catch((error) => {
-    console.error('[startup] failed to initialize', error);
+    logError('startup failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     try {
       setHudState({ state: 'error', message: 'Falha ao iniciar app (dev server).' });
     } catch {

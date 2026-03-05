@@ -19,6 +19,10 @@ npm ci --workspaces=false
 npm run dev:desktop
 ```
 
+## STT provider
+
+This project runs only with Azure Speech-to-Text.
+
 ## Azure config for installed app (.exe)
 
 For the installed Windows app, configure variables in the OS environment (not only in `.env.local`):
@@ -179,6 +183,9 @@ Update notes:
   - `bullet point` / `bullet` / `tópico` / `topico` -> `•`
   - `item 1` / `número 1` / `numero 1` / `number 1` -> `1.`
   - `nova linha` / `new line` -> line break
+  - `abre colchetes` / `fecha colchetes` -> `[` / `]`
+  - `travessão` / `travessao` -> `—`
+  - `ponto final` -> `.`
 - Feature can be enabled/disabled in **Settings**.
 
 ## App icon
@@ -232,12 +239,13 @@ Post-sync checklist:
   2. **Auto-paste** (`Ctrl+V` simulation) may fail in protected/restricted windows.
 - Therefore MVP keeps a safe fallback: **always copy to clipboard**; auto-paste is optional.
 
-## Azure Speech (env vars)
+## STT provider (env vars)
 
-- `AZURE_SPEECH_KEY`
-- `AZURE_SPEECH_REGION`
-- optional: `AZURE_SPEECH_LANGUAGE` (default: `pt-BR`)
-- optional: `VOICE_PHRASES` (comma-separated hints for slang/English/app names)
+- Azure:
+  - `AZURE_SPEECH_KEY`
+  - `AZURE_SPEECH_REGION`
+  - optional: `AZURE_SPEECH_LANGUAGE` (default: `pt-BR`)
+  - optional: `VOICE_PHRASES` (comma-separated hints for slang/English/app names)
 - `VOICE_HUD` (default: `1`) shows always-on-top indicator in bottom-right corner
 - `VOICE_HUD_DEBUG=1` turns HUD into normal debug window (frame/devtools)
 - `VOICE_MAX_SESSION_SECONDS` (default: `90`)

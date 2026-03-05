@@ -1,4 +1,5 @@
 import { BrowserWindow } from 'electron';
+import { hardenBrowserWindow } from './window-security.js';
 
 const MAIN_WINDOW_MIN_WIDTH = 860;
 const MAIN_WINDOW_MAX_WIDTH = 1400;
@@ -103,15 +104,24 @@ export async function createMainWindow(options: CreateMainWindowOptions) {
   const bounds = computeMainWindowBounds(options.getPreferredDisplay().workArea);
   const mainWindow = new BrowserWindow({
     ...bounds,
+    frame: false,
+    roundedCorners: true,
+    thickFrame: true,
+    backgroundColor: '#0a0a0c',
     minWidth: MAIN_WINDOW_MIN_WIDTH,
     minHeight: MAIN_WINDOW_MIN_HEIGHT,
     show: true,
     icon: options.getIconPath(),
     webPreferences: {
+      sandbox: true,
       contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
       preload: options.getPreloadPath(),
     },
   });
+  hardenBrowserWindow(mainWindow, options.devServerUrl);
 
   mainWindow.on('close', (event) => {
     if (options.isQuitting()) return;

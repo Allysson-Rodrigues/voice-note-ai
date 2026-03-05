@@ -1,7 +1,18 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 const api = {
+  windowMinimize: () => ipcRenderer.send('window:minimize'),
+  windowMaximize: () => ipcRenderer.send('window:maximize'),
+  windowClose: () => ipcRenderer.send('window:close'),
+  isWindowMaximized: () => ipcRenderer.invoke('window:is-maximized'),
+  onMaximizedChange: (cb) => {
+    const listener = (_event, isMaximized) => cb(isMaximized);
+    ipcRenderer.on('window:maximized-change', listener);
+    return () => ipcRenderer.off('window:maximized-change', listener);
+  },
   listDictionary: () => ipcRenderer.invoke('dictionary:list'),
+  exportDictionary: () => ipcRenderer.invoke('dictionary:export'),
+  importDictionary: (payload) => ipcRenderer.invoke('dictionary:import', payload),
   addDictionaryTerm: (payload) => ipcRenderer.invoke('dictionary:add', payload),
   updateDictionaryTerm: (payload) => ipcRenderer.invoke('dictionary:update', payload),
   removeDictionaryTerm: (id) => ipcRenderer.invoke('dictionary:remove', { id }),
@@ -15,6 +26,8 @@ const api = {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   getRuntimeInfo: () => ipcRenderer.invoke('app:runtime-info'),
   getHealthCheck: () => ipcRenderer.invoke('app:health-check'),
+  getPerfSummary: () => ipcRenderer.invoke('app:perf-summary'),
+  getRecentLogs: (params) => ipcRenderer.invoke('app:logs:recent', params ?? {}),
   retryHoldHook: () => ipcRenderer.invoke('app:retry-hold-hook'),
   updateSettings: (partial) => ipcRenderer.invoke('settings:update', partial),
   setAutoPasteEnabled: (enabled) => ipcRenderer.invoke('settings:autoPaste', { enabled }),

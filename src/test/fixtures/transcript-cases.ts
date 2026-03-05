@@ -41,4 +41,25 @@ export const transcriptCases: TranscriptCase[] = [
     formatCommandsEnabled: true,
     expected: 'Olá, tudo bem?\n(teste).',
   },
+  {
+    name: 'applies bracket and dash commands',
+    input: 'abre colchetes teste fecha colchetes travessão ok',
+    toneMode: 'casual',
+    formatCommandsEnabled: true,
+    expected: '[teste] — ok',
+  },
+  {
+    name: 'handles ponto final explicitly',
+    input: 'oi ponto final',
+    toneMode: 'formal',
+    formatCommandsEnabled: true,
+    expected: 'Oi.',
+  },
+  {
+    name: 'preserves acronyms in very casual mode',
+    input: 'NASA inicia testes',
+    toneMode: 'very-casual',
+    formatCommandsEnabled: true,
+    expected: 'NASA inicia testes',
+  },
 ];

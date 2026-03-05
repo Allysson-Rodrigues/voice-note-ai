@@ -1,4 +1,12 @@
 import type { BrowserWindow, IpcMain } from 'electron';
+import {
+    MAX_PCM_CHUNK_BYTES,
+    MIN_AUDIO_CHUNK_INTERVAL_MS,
+    validateSttAudioPayload,
+    validateSttStartPayload,
+    validateSttStopPayload,
+} from '../ipc-validation.js';
+import { logInfo, logPerf, logWarn } from '../logger.js';
 import type { AppSettings, LanguageMode } from '../settings-store.js';
 import type { InjectResult } from './text-injection.js';
 
@@ -8,6 +16,7 @@ const RETRY_REPLAY_BYTES = 16000 * 2 * 6;
 const RETRY_BACKOFF_MS = 250;
 const HUD_SUCCESS_VISIBLE_MS = 1100;
 const HUD_ERROR_VISIBLE_MS = 900;
+const LOW_CONFIDENCE_THRESHOLD = 0.72;
 
 type HudVisualState = 'idle' | 'listening' | 'finalizing' | 'injecting' | 'success' | 'error';
 type HudState = {
@@ -43,6 +52,7 @@ type SttSession = {
   audioRing: Buffer[];
   audioRingBytes: number;
   timeoutTimer: NodeJS.Timeout | null;
+  lastAudioChunkAtMs: number | null;
 };
 
 type SttSessionManagerOptions = {
@@ -51,9 +61,10 @@ type SttSessionManagerOptions = {
   broadcast: (channel: string, payload: unknown) => void;
   setHudState: (state: HudState) => void;
   emitAppError: (message: string) => void;
-  postprocessTranscript: (rawText: string) => string;
+  postprocessTranscript: (rawText: string) => Promise<string>;
   getMainWindow: () => BrowserWindow | null;
   getForegroundWindowHandle: () => Promise<string | null>;
+  getWindowAppKey?: (handle: string | null) => Promise<string | null>;
   resolveInjectionTargetWindowHandle: (
     sessionTargetWindowHandle: string | null,
   ) => Promise<string | null>;
@@ -62,15 +73,29 @@ type SttSessionManagerOptions = {
   onSessionCompleted?: (entry: {
     sessionId: string;
     text: string;
+    rawText?: string;
     pasted: boolean;
     skippedReason?: 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
     retryCount: number;
     sessionDurationMs: number;
     injectTotalMs: number;
+    pttToFirstPartialMs: number;
+    pttToFinalMs: number;
     resolveWindowMs?: number;
     pasteAttemptMs?: number;
     clipboardRestoreMs?: number;
+    languageChosen?: string;
+    appliedRules?: string[];
+    confidenceSummary?: {
+      best?: number;
+      mode?: string;
+    };
   }) => Promise<void> | void;
+  getAppProfile?: (appKey: string | null) => {
+    injectionMethod?: string;
+    languageBias?: 'pt-BR' | 'en-US' | 'mixed';
+    postprocessProfile?: 'safe' | 'balanced' | 'aggressive';
+  } | undefined;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -94,6 +119,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
   let cachedSpeechSDK: any | null = null;
   let phraseCache: string[] | null = null;
   let phraseCacheDirty = true;
+  let lastPhraseBoostCount = 0;
   let activeSession: SttSession | null = null;
   let pendingStopTimer: NodeJS.Timeout | null = null;
   let pendingStopSessionId: string | null = null;
@@ -198,6 +224,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
       ...(settings.extraPhrases ?? []),
       ...extractCanonicalPhrases(),
     ]);
+    lastPhraseBoostCount = phraseCache.length;
     phraseCacheDirty = false;
     return phraseCache;
   }
@@ -308,7 +335,10 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
         const grammar = SpeechSDK.PhraseListGrammar.fromRecognizer(recognizer);
         for (const phrase of phrases) grammar.addPhrase(phrase);
       } catch (error) {
-        console.warn('Failed to apply phrase list.', error);
+        logWarn('failed to apply phrase list', {
+          language,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
 
@@ -380,7 +410,10 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
 
     if (session.sttReadyAtMs == null) {
       session.sttReadyAtMs = Date.now();
-      console.log(`[perf] stt_ready_ms=${session.sttReadyAtMs - session.startedAtMs}`);
+      logPerf('stt ready', {
+        sessionId: session.sessionId,
+        sttReadyMs: session.sttReadyAtMs - session.startedAtMs,
+      });
     }
   }
 
@@ -391,10 +424,11 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
   function chooseBestFinalText(session: SttSession) {
     return session.slots
       .map((slot) => ({
+        language: slot.language,
         text: slot.transcriptFinal.trim(),
         confidence: slot.bestConfidence ?? -1,
       }))
-      .sort((a, b) => b.confidence - a.confidence || b.text.length - a.text.length)[0]?.text;
+      .sort((a, b) => b.confidence - a.confidence || b.text.length - a.text.length)[0];
   }
 
   function sessionAgeMs(session: SttSession) {
@@ -450,15 +484,112 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     if (!canRetrySession(session, event)) return false;
 
     session.retryCount += 1;
-    console.warn(
-      `[retry] retrying STT session ${session.sessionId} (attempt=${session.retryCount})`,
-    );
+    logWarn('retrying stt session', {
+      sessionId: session.sessionId,
+      attempt: session.retryCount,
+    });
     await sleep(RETRY_BACKOFF_MS);
 
     if (!activeSession || activeSession.sessionId !== session.sessionId || session.ending)
       return false;
     await rebuildSessionRecognizers(session);
     return true;
+  }
+
+  async function transcribeAudioRingWithLanguage(session: SttSession, language: string) {
+    const SpeechSDK = await getSpeechSdk();
+    const { key, region } = getAzureConfig();
+    const phrases = await getActivePhrasesCached();
+    const slot = createRecognizerSlot(SpeechSDK, language, key, region, phrases);
+
+    return await new Promise<{ text: string; confidence: number | null; language: string }>(
+      (resolve, reject) => {
+        slot.recognizer.recognized = (_: unknown, event: any) => {
+          const text = event?.result?.text ?? '';
+          if (text) {
+            slot.transcriptFinal = `${slot.transcriptFinal}${slot.transcriptFinal ? ' ' : ''}${text}`;
+          }
+          const json = event?.result?.json;
+          if (typeof json !== 'string' || !json) return;
+          try {
+            const parsed = JSON.parse(json);
+            const confidence = parsed?.NBest?.[0]?.Confidence;
+            if (typeof confidence === 'number' && Number.isFinite(confidence)) {
+              slot.bestConfidence =
+                slot.bestConfidence == null ? confidence : Math.max(slot.bestConfidence, confidence);
+            }
+          } catch {
+            // ignore
+          }
+        };
+
+        const finalize = async () => {
+          try {
+            await closeSlot(slot);
+          } catch {
+            // ignore
+          }
+          resolve({
+            text: slot.transcriptFinal.trim(),
+            confidence: slot.bestConfidence,
+            language,
+          });
+        };
+
+        slot.recognizer.sessionStopped = () => {
+          void finalize();
+        };
+        slot.recognizer.canceled = () => {
+          void finalize();
+        };
+
+        slot.recognizer.startContinuousRecognitionAsync(
+          () => {
+            for (const chunk of session.audioRing) {
+              slot.pushStream.write(chunk);
+            }
+            slot.pushStream.close();
+            try {
+              slot.recognizer.stopContinuousRecognitionAsync(() => undefined, reject);
+            } catch (error) {
+              reject(error);
+            }
+          },
+          reject,
+        );
+      },
+    );
+  }
+
+  async function maybeResolveFallbackTranscript(session: SttSession, initial: {
+    text: string;
+    confidence: number;
+    language: string;
+  }) {
+    const settings = options.getSettings();
+    if (settings.languageMode !== 'dual') return initial;
+    if (settings.dualLanguageStrategy !== 'fallback-on-low-confidence') return initial;
+    if (initial.confidence >= LOW_CONFIDENCE_THRESHOLD) return initial;
+    if (session.audioRing.length === 0) return initial;
+
+    const fallback = await transcribeAudioRingWithLanguage(session, 'en-US').catch(() => null);
+    if (!fallback?.text) return initial;
+    const fallbackConfidence = fallback.confidence ?? -1;
+    if (fallbackConfidence > initial.confidence || fallback.text.length > initial.text.length + 12) {
+      logInfo('using fallback transcript language', {
+        sessionId: session.sessionId,
+        from: initial.language,
+        to: fallback.language,
+        initialConfidence: initial.confidence,
+        fallbackConfidence,
+      });
+      return {
+        text: fallback.text,
+        confidence: fallbackConfidence,
+        language: fallback.language,
+      };
+    }
+    return initial;
   }
 
   function feedAudioChunk(session: SttSession, chunk: Buffer) {
@@ -499,31 +630,51 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     const injectMs =
       session.injectAtMs && session.finalAtMs ? session.injectAtMs - session.finalAtMs : -1;
 
-    console.log(
-      `[perf] session_duration_ms=${durationMs} ptt_to_first_partial_ms=${firstPartialMs} ptt_to_final_ms=${finalMs} inject_total_ms=${injectMs} retry_count=${session.retryCount}`,
-    );
+    logPerf('session completed', {
+      sessionId: session.sessionId,
+      sessionDurationMs: durationMs,
+      pttToFirstPartialMs: firstPartialMs,
+      pttToFinalMs: finalMs,
+      injectTotalMs: injectMs,
+      retryCount: session.retryCount,
+    });
   }
 
   async function persistCompletedSession(
     session: SttSession,
     finalText: string,
+    rawText: string,
+    bestResult: { confidence: number; language: string },
     injection: Pick<InjectResult, 'pasted' | 'skippedReason' | 'metrics'>,
   ) {
     if (!finalText || !options.onSessionCompleted) return;
     const sessionDurationMs = sessionAgeMs(session);
+    const firstPartialMs = session.firstPartialAtMs
+      ? session.firstPartialAtMs - session.startedAtMs
+      : -1;
+    const finalMs = session.finalAtMs ? session.finalAtMs - session.startedAtMs : -1;
     const injectTotalMs =
       session.injectAtMs && session.finalAtMs ? session.injectAtMs - session.finalAtMs : -1;
     await options.onSessionCompleted({
       sessionId: session.sessionId,
       text: finalText,
+      rawText,
       pasted: injection.pasted,
       skippedReason: injection.skippedReason,
       retryCount: session.retryCount,
       sessionDurationMs,
       injectTotalMs,
+      pttToFirstPartialMs: firstPartialMs,
+      pttToFinalMs: finalMs,
       resolveWindowMs: injection.metrics?.resolveWindowMs,
       pasteAttemptMs: injection.metrics?.pasteAttemptMs,
       clipboardRestoreMs: injection.metrics?.clipboardRestoreMs,
+      languageChosen: bestResult.language,
+      appliedRules: rawText !== finalText ? ['postprocess'] : [],
+      confidenceSummary: {
+        best: bestResult.confidence,
+        mode: options.getSettings().dualLanguageStrategy,
+      },
     });
   }
 
@@ -535,7 +686,10 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
 
       if (session.firstPartialAtMs == null) {
         session.firstPartialAtMs = Date.now();
-        console.log(`[perf] first_partial_ms=${session.firstPartialAtMs - session.startedAtMs}`);
+        logPerf('first partial received', {
+          sessionId: session.sessionId,
+          firstPartialMs: session.firstPartialAtMs - session.startedAtMs,
+        });
       }
 
       options.broadcast('stt:partial', { sessionId: session.sessionId, text });
@@ -585,7 +739,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     };
   }
 
-  function pickSessionLanguages(payloadLanguage?: string) {
+  function pickSessionLanguages(payloadLanguage?: string, appKey?: string | null) {
     const settings = options.getSettings();
     const mode: LanguageMode =
       settings.languageMode === 'dual'
@@ -593,9 +747,15 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
         : settings.languageMode === 'en-US'
           ? 'en-US'
           : 'pt-BR';
+    const appProfile = options.getAppProfile?.(appKey ?? null);
 
-    if (mode === 'dual') return ['pt-BR', 'en-US'];
+    if (mode === 'dual') {
+      if (settings.dualLanguageStrategy === 'parallel') return ['pt-BR', 'en-US'];
+      if (appProfile?.languageBias === 'en-US') return ['en-US'];
+      return ['pt-BR'];
+    }
     if (mode === 'en-US') return ['en-US'];
+    if (appProfile?.languageBias === 'en-US') return ['en-US'];
     return [payloadLanguage ?? process.env.AZURE_SPEECH_LANGUAGE ?? 'pt-BR'];
   }
 
@@ -623,16 +783,27 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
       let session: SttSession | null = null;
 
       try {
-        const SpeechSDK = await getSpeechSdk();
-        const { key, region, language: defaultLanguage } = getAzureConfig();
+        let SpeechSDK: any = null;
+        let key = '';
+        let region = '';
+        let phrases: string[] = [];
+        let languages: string[] = [];
+
+        SpeechSDK = await getSpeechSdk();
+        const { key: azureKey, region: azureRegion, language: defaultLanguage } = getAzureConfig();
+        key = azureKey;
+        region = azureRegion;
         const language = payload.language ?? defaultLanguage;
-        const phrases = await getActivePhrasesCached();
-        const languages = pickSessionLanguages(language);
+        phrases = await getActivePhrasesCached();
 
         const targetWindowHandle =
           pendingTargetWindowBySession.get(payload.sessionId) ??
           (await options.getForegroundWindowHandle());
         pendingTargetWindowBySession.delete(payload.sessionId);
+        const appKey = options.getWindowAppKey
+          ? await options.getWindowAppKey(targetWindowHandle).catch(() => null)
+          : null;
+        languages = pickSessionLanguages(language, appKey);
 
         session = {
           sessionId: payload.sessionId,
@@ -651,6 +822,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
           audioRing: [],
           audioRingBytes: 0,
           timeoutTimer: null,
+          lastAudioChunkAtMs: null,
         };
 
         session.slots = languages.map((entry) =>
@@ -663,6 +835,11 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
         activeSession = session;
         scheduleSessionTimeout(session);
         options.setHudState({ state: 'listening' });
+        logInfo('stt session started', {
+          sessionId: session.sessionId,
+          languages,
+          phraseBoostCount: lastPhraseBoostCount,
+        });
 
         await startSlots(session);
         return { ok: true };
@@ -690,20 +867,49 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     return await startSttSession(sender, { sessionId });
   }
 
-  function onAudioChunk(payload: { sessionId: string; pcm16kMonoInt16: ArrayBuffer }) {
+  function onAudioChunk(payload: { sessionId: string; pcm16kMonoInt16: ArrayBuffer | Uint8Array }) {
     if (!activeSession || activeSession.sessionId !== payload.sessionId) return;
     if (activeSession.ending) return;
+    const now = Date.now();
+    if (
+      activeSession.lastAudioChunkAtMs != null &&
+      now - activeSession.lastAudioChunkAtMs < MIN_AUDIO_CHUNK_INTERVAL_MS
+    ) {
+      return;
+    }
+    activeSession.lastAudioChunkAtMs = now;
 
     const chunk = Buffer.from(payload.pcm16kMonoInt16);
+    if (chunk.byteLength <= 0 || chunk.byteLength > MAX_PCM_CHUNK_BYTES) {
+      logWarn('dropping invalid audio chunk', {
+        sessionId: payload.sessionId,
+        chunkBytes: chunk.byteLength,
+      });
+      return;
+    }
     const level = computePcm16Level(chunk);
     options.broadcast('hud:level', { sessionId: payload.sessionId, level });
     feedAudioChunk(activeSession, chunk);
   }
 
   async function stopSession(payload: { sessionId: string }) {
-    if (!activeSession || activeSession.sessionId !== payload.sessionId) {
-      return { ok: false };
+    const pendingStart = pendingSttStartBySession.get(payload.sessionId);
+    if (pendingStart) {
+      // Aguarda a inicialização terminar para que possamos encerrá-la com segurança.
+      await pendingStart.catch(() => undefined);
     }
+
+    if (!activeSession || activeSession.sessionId !== payload.sessionId) {
+      // Se não havia sessão ativa, ou pertencia a outro ID, encerramos pacificamente.
+      // E se estivesse 'presa' e quisermos forçar parada independentemente do ID de payload,
+      // podemos permitir matar a ativa se o payload.sessionId == "force"
+      if (payload.sessionId === 'force' && activeSession) {
+         logWarn('forçando parada da sessão ativa que ficou presa', { sessionId: activeSession.sessionId });
+      } else {
+         return { ok: false };
+      }
+    }
+
 
     const session = activeSession;
     session.ending = true;
@@ -713,6 +919,10 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
 
     try {
       setHudForSession({ state: 'finalizing' });
+
+      let bestRawText = '';
+      let bestResultLanguage = 'pt-BR';
+      let bestResultConfidence = -1;
 
       for (const slot of session.slots) {
         try {
@@ -745,8 +955,19 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
         }
       }
 
-      const bestRawText = chooseBestFinalText(session) ?? '';
-      const finalText = bestRawText ? options.postprocessTranscript(bestRawText) : '';
+      const bestCandidate = chooseBestFinalText(session);
+      const resolvedCandidate = bestCandidate
+        ? await maybeResolveFallbackTranscript(session, {
+            text: bestCandidate.text,
+            confidence: bestCandidate.confidence,
+            language: bestCandidate.language,
+          })
+        : null;
+      bestRawText = resolvedCandidate?.text ?? '';
+      bestResultLanguage = resolvedCandidate?.language ?? 'pt-BR';
+      bestResultConfidence = resolvedCandidate?.confidence ?? -1;
+
+      const finalText = bestRawText ? await options.postprocessTranscript(bestRawText) : '';
       session.finalAtMs = Date.now();
 
       if (!finalText) {
@@ -763,7 +984,13 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
       const injection = await options.injectText(finalText, targetWindowHandle);
       session.injectAtMs = Date.now();
 
-      await persistCompletedSession(session, finalText, injection);
+      await persistCompletedSession(
+        session,
+        finalText,
+        bestRawText,
+        { confidence: bestResultConfidence, language: bestResultLanguage },
+        injection,
+      );
 
       if (injection.skippedReason === 'WINDOW_CHANGED') {
         const message = 'Janela mudou durante o ditado. Texto copiado para colagem manual.';
@@ -798,20 +1025,26 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
   function registerIpcHandlers(ipcMain: IpcMain) {
     ipcMain.handle(
       'stt:start',
-      async (event, payload: { sessionId: string; language?: string }) => {
-        return await startSttSession(event.sender, payload);
+      async (event, payload: unknown) => {
+        return await startSttSession(event.sender, validateSttStartPayload(payload));
       },
     );
 
     ipcMain.on(
       'stt:audio',
-      (_event, payload: { sessionId: string; pcm16kMonoInt16: ArrayBuffer }) => {
-        onAudioChunk(payload);
+      (_event, payload: unknown) => {
+        try {
+          onAudioChunk(validateSttAudioPayload(payload));
+        } catch (error) {
+          logWarn('rejected invalid stt audio payload', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       },
     );
 
-    ipcMain.handle('stt:stop', async (_event, payload: { sessionId: string }) => {
-      return await stopSession(payload);
+    ipcMain.handle('stt:stop', async (_event, payload: unknown) => {
+      return await stopSession(validateSttStopPayload(payload));
     });
   }
 
@@ -832,6 +1065,10 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     scheduleStop,
     cancelPendingStop,
     registerIpcHandlers,
+    getPhraseBoostCount: async () => {
+      await getActivePhrasesCached();
+      return lastPhraseBoostCount;
+    },
     dispose,
   };
 }

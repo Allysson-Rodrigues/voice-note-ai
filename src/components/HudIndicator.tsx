@@ -1,12 +1,13 @@
-import { motion, useReducedMotion } from 'framer-motion';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-type HudState = 'idle' | 'listening' | 'finalizing' | 'error';
+type HudState = 'idle' | 'listening' | 'finalizing' | 'injecting' | 'success' | 'error';
 
 const LABEL_BY_STATE: Record<HudState, string> = {
   idle: 'IDLE',
   listening: 'LISTENING',
   finalizing: 'FINALIZING',
+  injecting: 'INJECTING',
+  success: 'SUCCESS',
   error: 'ERROR',
 };
 
@@ -77,8 +78,23 @@ function buildWavePath({
   return d;
 }
 
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setPrefersReducedMotion(media.matches);
+    sync();
+    media.addEventListener?.('change', sync);
+    return () => media.removeEventListener?.('change', sync);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
 function Oscilloscope({ state }: { state: HudState }) {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePrefersReducedMotion();
   const allowMotion = !reduceMotion || state !== 'idle';
   const pathRef = useRef<SVGPathElement | null>(null);
   const glowRef = useRef<SVGPathElement | null>(null);
@@ -130,6 +146,10 @@ function Oscilloscope({ state }: { state: HudState }) {
           ? 6.9
           : current === 'finalizing'
             ? 3.9
+            : current === 'injecting'
+              ? 4.8
+              : current === 'success'
+                ? 2.4
             : current === 'error'
               ? 2.6
               : 1.7;
@@ -138,6 +158,10 @@ function Oscilloscope({ state }: { state: HudState }) {
           ? 5.4
           : current === 'finalizing'
             ? 2.4
+            : current === 'injecting'
+              ? 3.2
+              : current === 'success'
+                ? 1.6
             : current === 'error'
               ? 1.3
               : 0.9;
@@ -189,10 +213,11 @@ function Oscilloscope({ state }: { state: HudState }) {
 }
 
 export default function HudIndicator({ state }: { state: HudState }) {
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = usePrefersReducedMotion();
   const allowMotion = !reduceMotion || state !== 'idle';
-  const active = state === 'listening' || state === 'finalizing';
+  const active = state === 'listening' || state === 'finalizing' || state === 'injecting';
   const error = state === 'error';
+  const success = state === 'success';
 
   const border = error ? 'border-rose-300/50' : 'border-white/15';
   const dot = error
@@ -201,17 +226,22 @@ export default function HudIndicator({ state }: { state: HudState }) {
       ? 'bg-cyan-300/90 shadow-[0_0_0_3px_rgba(34,211,238,0.18)]'
       : state === 'finalizing'
         ? 'bg-white/75 shadow-[0_0_0_3px_rgba(255,255,255,0.10)]'
+        : success
+          ? 'bg-emerald-300/90 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]'
         : 'bg-white/35';
+  const rootAnimation = allowMotion && active ? 'hud-indicator-pulse 0.85s ease-in-out infinite' : undefined;
+  const sheenAnimation =
+    allowMotion && active ? 'hud-indicator-sweep 1.7s ease-in-out infinite' : undefined;
+  const dotAnimation = !allowMotion
+    ? undefined
+    : active
+      ? 'hud-indicator-dot-active 0.66s ease-in-out infinite'
+      : 'hud-indicator-dot-idle 2.5s ease-in-out infinite';
 
   return (
-    <motion.div
+    <div
       className="relative h-full w-full"
-      animate={allowMotion && active ? { scale: [1, 1.009, 1] } : { opacity: 1 }}
-      transition={{
-        duration: 0.85,
-        repeat: allowMotion && active ? Infinity : 0,
-        ease: 'easeInOut',
-      }}
+      style={{ animation: rootAnimation }}
       role="status"
       aria-live="polite"
       aria-label={`HUD ${LABEL_BY_STATE[state]}`}
@@ -222,40 +252,26 @@ export default function HudIndicator({ state }: { state: HudState }) {
         <div className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-[#080c14]/92 px-2.5 backdrop-blur-xl">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(90%_65%_at_50%_0%,rgba(255,255,255,0.06),transparent_62%),radial-gradient(100%_80%_at_20%_120%,rgba(56,189,248,0.10),transparent_68%)]" />
 
-          <motion.div
+          <div
             className="pointer-events-none absolute -left-[35%] top-0 h-full w-[65%] bg-[linear-gradient(115deg,transparent,rgba(56,189,248,0.08),transparent)]"
-            animate={
-              !allowMotion || !active
-                ? { x: 0, opacity: 0 }
-                : { x: ['-10%', '220%'], opacity: [0, 1, 0] }
-            }
-            transition={{
-              duration: 1.7,
-              repeat: !allowMotion || !active ? 0 : Infinity,
-              ease: 'easeInOut',
+            style={{
+              animation: sheenAnimation,
+              opacity: allowMotion && active ? undefined : 0,
             }}
           />
 
           <div className="relative flex items-center gap-2">
-            <motion.div
+            <div
               className={`h-[6px] w-[6px] rounded-full ${dot}`}
-              animate={
-                !allowMotion
-                  ? { opacity: 0.7 }
-                  : active
-                    ? { scale: [1, 1.3, 1], opacity: [0.45, 1, 0.45] }
-                    : { scale: [1, 1.08, 1], opacity: [0.25, 0.42, 0.25] }
-              }
-              transition={{
-                duration: active ? 0.66 : 2.5,
-                repeat: !allowMotion ? 0 : Infinity,
-                ease: 'easeInOut',
+              style={{
+                animation: dotAnimation,
+                opacity: allowMotion ? undefined : 0.7,
               }}
             />
             <Oscilloscope state={state} />
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

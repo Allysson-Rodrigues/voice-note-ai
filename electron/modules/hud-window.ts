@@ -1,4 +1,5 @@
 import { BrowserWindow, screen } from 'electron';
+import { hardenBrowserWindow } from './window-security.js';
 
 const HUD_MIN_WIDTH = 220;
 const HUD_MAX_WIDTH = 380;
@@ -278,10 +279,15 @@ export function createHudWindowController(options: HudWindowControllerOptions) {
       backgroundColor: options.debug ? '#111111' : '#00000000',
       icon: options.getIconPath(),
       webPreferences: {
+        sandbox: true,
         contextIsolation: true,
+        nodeIntegration: false,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
         preload: options.getPreloadPath(),
       },
     });
+    hardenBrowserWindow(hudWindow, options.devServerUrl);
 
     if (!options.debug) hudWindow.setIgnoreMouseEvents(true, { forward: true });
     hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
