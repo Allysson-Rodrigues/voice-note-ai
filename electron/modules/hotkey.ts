@@ -15,6 +15,35 @@ type HudState = {
   message?: string;
 };
 
+type UiohookKeyEvent = {
+  keycode?: number;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+};
+
+type UiohookInstance = {
+  on: (event: 'keydown' | 'keyup' | 'error', listener: (payload: unknown) => void) => void;
+  off?: (event: 'keydown' | 'keyup' | 'error', listener: (payload: unknown) => void) => void;
+  start: () => void;
+  stop?: () => void;
+};
+
+type UiohookImport = {
+  uIOhook?: UiohookInstance;
+  default?: UiohookInstance | { uIOhook?: UiohookInstance };
+};
+
+function resolveUiohookInstance(mod: UiohookImport): UiohookInstance | null {
+  const defaultExport = mod.default;
+  if (defaultExport && 'on' in defaultExport && 'start' in defaultExport) {
+    return defaultExport;
+  }
+  if (defaultExport && 'uIOhook' in defaultExport) {
+    return defaultExport.uIOhook ?? null;
+  }
+  return mod.uIOhook ?? null;
+}
+
 type HotkeyServiceOptions = {
   primaryHotkey: string;
   fallbackHotkey: string;
@@ -167,15 +196,14 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
     if (!options.holdToTalkEnabled) return null;
     if (process.platform !== 'win32') return null;
 
-    let uiohookMod: any;
+    let uiohookMod: UiohookImport;
     try {
-      uiohookMod = await import('uiohook-napi');
+      uiohookMod = (await import('uiohook-napi')) as UiohookImport;
     } catch {
       return null;
     }
 
-    const uIOhook =
-      uiohookMod.uIOhook ?? uiohookMod.default?.uIOhook ?? uiohookMod.default ?? uiohookMod;
+    const uIOhook = resolveUiohookInstance(uiohookMod);
     if (!uIOhook?.on || !uIOhook?.start) return null;
 
     const required = parseHoldKeycodes();
@@ -217,17 +245,19 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
       options.onReleaseActiveSession(activeSessionId);
     }
 
-    const onKeyDown = (event: any) => {
-      if (typeof event?.keycode === 'number') pressed.add(event.keycode);
-      ctrlDown = Boolean(event?.ctrlKey) || pressed.has(29) || pressed.has(3613);
-      metaDown = Boolean(event?.metaKey) || pressed.has(3675) || pressed.has(3676);
+    const onKeyDown = (event: unknown) => {
+      const keyEvent = event as UiohookKeyEvent;
+      if (typeof keyEvent.keycode === 'number') pressed.add(keyEvent.keycode);
+      ctrlDown = Boolean(keyEvent.ctrlKey) || pressed.has(29) || pressed.has(3613);
+      metaDown = Boolean(keyEvent.metaKey) || pressed.has(3675) || pressed.has(3676);
       recomputeChordActive();
     };
 
-    const onKeyUp = (event: any) => {
-      if (typeof event?.keycode === 'number') pressed.delete(event.keycode);
-      ctrlDown = Boolean(event?.ctrlKey);
-      metaDown = Boolean(event?.metaKey);
+    const onKeyUp = (event: unknown) => {
+      const keyEvent = event as UiohookKeyEvent;
+      if (typeof keyEvent.keycode === 'number') pressed.delete(keyEvent.keycode);
+      ctrlDown = Boolean(keyEvent.ctrlKey);
+      metaDown = Boolean(keyEvent.metaKey);
       recomputeChordActive();
     };
 
@@ -260,9 +290,9 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
 
     return () => {
       try {
-        uIOhook.off('keydown', onKeyDown);
-        uIOhook.off('keyup', onKeyUp);
         if (typeof uIOhook.off === 'function') {
+          uIOhook.off('keydown', onKeyDown);
+          uIOhook.off('keyup', onKeyUp);
           uIOhook.off('error', onHookError);
         }
         if (uIOhook.stop) uIOhook.stop();

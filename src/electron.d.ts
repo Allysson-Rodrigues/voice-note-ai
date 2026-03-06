@@ -44,6 +44,8 @@ export type AppProfile = {
   postprocessProfile?: 'safe' | 'balanced' | 'aggressive';
 };
 
+export type HistoryStorageMode = 'plain' | 'encrypted';
+
 export type HistorySkipReason = 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
 
 export type HistoryEntry = {
@@ -127,7 +129,7 @@ declare global {
         historyEnabled: boolean;
         historyRetentionDays: number;
         privacyMode: boolean;
-        historyStorageMode: 'plain' | 'encrypted';
+        historyStorageMode: HistoryStorageMode;
         postprocessProfile: 'safe' | 'balanced' | 'aggressive';
         dualLanguageStrategy: 'parallel' | 'fallback-on-low-confidence';
         appProfiles: Record<string, AppProfile>;
@@ -158,7 +160,7 @@ declare global {
           historyEnabled: boolean;
           historyRetentionDays: number;
           privacyMode: boolean;
-          historyStorageMode: 'plain' | 'encrypted';
+          historyStorageMode: HistoryStorageMode;
           postprocessProfile: 'safe' | 'balanced' | 'aggressive';
           dualLanguageStrategy: 'parallel' | 'fallback-on-low-confidence';
           appProfiles: Record<string, AppProfile>;

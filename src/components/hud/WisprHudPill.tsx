@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type HudState = 'idle' | 'listening' | 'finalizing' | 'injecting' | 'success' | 'error';
 
@@ -14,153 +14,150 @@ type HudHoverEvent = {
   hovered: boolean;
 };
 
-const COL_COUNT = 28;
-const MAX_BLOCKS = 8;
-const BLOCK_SIZE = 3;
-const BLOCK_GAP = 1.5;
-const COL_GAP = 1.5;
-const WAVE_H = MAX_BLOCKS * BLOCK_SIZE + (MAX_BLOCKS - 1) * BLOCK_GAP;
-
-const AMPLITUDE_PROFILE = [
-  0.2, 0.45, 0.3, 0.7, 0.38, 0.85, 0.5, 0.95, 0.6, 0.75, 0.35, 0.9, 0.55, 1.0, 0.65, 0.82, 0.42,
-  0.7, 0.28, 0.92, 0.88, 0.45, 0.78, 0.32, 0.85, 0.55, 0.72, 0.22,
-];
-
-const IDLE_PROFILE = [
-  0.12, 0.25, 0.18, 0.38, 0.22, 0.48, 0.3, 0.55, 0.35, 0.42, 0.2, 0.5, 0.32, 0.58, 0.38, 0.46, 0.25,
-  0.4, 0.16, 0.52, 0.5, 0.26, 0.44, 0.18, 0.48, 0.32, 0.4, 0.14,
-];
-
-function clamp01(value: number) {
-  return Math.max(0, Math.min(1, value));
-}
+const COL_COUNT = 14;
+const CURVE_PROFILE = Array.from({ length: COL_COUNT }, (_, i) =>
+  Math.sin((i / (COL_COUNT - 1)) * Math.PI),
+);
 
 function resolveLabel(hudState: HudState) {
-  if (hudState === 'listening') return 'REC';
-  if (hudState === 'finalizing') return 'PENSAR';
-  if (hudState === 'injecting') return 'FLOW';
-  if (hudState === 'success') return 'FEITO!';
-  if (hudState === 'error') return 'OPS...';
-  return 'FLOW';
+  if (hudState === 'listening') return 'Ouvindo';
+  if (hudState === 'finalizing') return 'Revisando';
+  if (hudState === 'injecting') return 'Inserindo';
+  if (hudState === 'success') return 'Concluído';
+  if (hudState === 'error') return 'Atenção';
+  return 'Pronto';
 }
 
-function resolveMeta(hudState: HudState, durationSec: number) {
-  if (hudState === 'listening') return `${durationSec}s`;
-  if (hudState === 'finalizing' || hudState === 'injecting') return 'FLOW';
-  if (hudState === 'success') return 'OK';
-  if (hudState === 'error') return '!';
-  return 'IDLE';
-}
+function IconMic({ state }: { state: HudState }) {
+  let innerContent;
 
-function resolveBlockColor(hudState: HudState, active: boolean) {
-  if (!active) return 'rgba(255,255,255,0.05)';
-  if (hudState === 'idle') return 'rgba(255,255,255,0.2)';
-  if (hudState === 'listening') return 'rgba(255,255,255,0.9)';
-  if (hudState === 'finalizing') return 'var(--warn)';
-  if (hudState === 'injecting') return 'var(--accentB)';
-  if (hudState === 'success') return 'var(--accentG)';
-  return 'var(--danger)';
-}
-
-function IconMic({ hudState }: { hudState: HudState }) {
-  if (hudState === 'success') {
-    return (
-      <svg
-        width={14}
-        height={14}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
+  if (state === 'success') {
+    innerContent = (
+      <polyline
+        points="8 12 11 15 16 9"
+        stroke="var(--brand-mic)"
+        strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
-      >
-        <polyline points="20 6 9 17 4 12" />
-      </svg>
+        fill="none"
+      />
     );
-  }
-
-  if (hudState === 'error') {
-    return (
-      <svg
-        width={14}
-        height={14}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
+  } else if (state === 'error') {
+    innerContent = (
+      <g stroke="var(--brand-mic)" strokeWidth="2" strokeLinecap="round">
+        <line x1="9" y1="9" x2="15" y2="15" />
+        <line x1="15" y1="9" x2="9" y2="15" />
+      </g>
+    );
+  } else if (state === 'injecting') {
+    innerContent = (
+      <g
+        stroke="var(--brand-mic)"
+        strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
+        fill="none"
       >
-        <line x1="18" y1="6" x2="6" y2="18" />
-        <line x1="6" y1="6" x2="18" y2="18" />
-      </svg>
+        <polyline points="10 7 10 11 15 11" />
+        <path d="M10 7H7a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-4" />
+      </g>
+    );
+  } else {
+    innerContent = (
+      <g>
+        <rect x="9.5" y="6" width="5" height="7" rx="2.5" fill="var(--brand-mic)" />
+        <path
+          d="M7 12.5v0.5a5 5 0 0 0 10 0v-0.5"
+          stroke="var(--brand-mic)"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          fill="none"
+        />
+        <path
+          d="M12 18v3M9 21h6"
+          stroke="var(--brand-mic)"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </g>
     );
   }
 
   return (
-    <svg
-      width={12}
-      height={12}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <line x1="12" y1="19" x2="12" y2="23" />
-      <line x1="8" y1="23" x2="16" y2="23" />
+    <svg width="20" height="20" viewBox="0 0 24 24" className="brand-svg">
+      {/* Anel base: Mantém a borda original sempre visível */}
+      <circle
+        cx="12"
+        cy="12"
+        r="11"
+        stroke="var(--brand-ring-base)"
+        strokeWidth="1.8"
+        fill="none"
+        className="brand-ring-base"
+      />
+
+      {/* Anel animado: Gira pontualmente por cima da borda base com pontas arredondadas */}
+      <circle
+        cx="12"
+        cy="12"
+        r="11"
+        stroke="var(--brand-ring-anim)"
+        strokeWidth="1.8"
+        fill="none"
+        className={`brand-ring-anim ring-${state}`}
+        strokeLinecap="round"
+      />
+
+      <g style={{ transition: 'all 0.3s ease' }}>{innerContent}</g>
     </svg>
   );
 }
 
-function Visualizer({
-  hudState,
-  levelRef,
-}: {
-  hudState: HudState;
-  levelRef: { current: number };
-}) {
-  const [levels, setLevels] = useState<number[]>(
-    () => Array.from({ length: COL_COUNT }, (_, index) => IDLE_PROFILE[index] ?? 0.1),
-  );
+function resolveBarColor(state: HudState, level: number) {
+  if (state === 'idle') return 'rgba(255,255,255,0.15)';
+  if (state === 'listening') return `rgba(56, 189, 248, ${Math.min(1, 0.4 + level)})`;
+  if (state === 'finalizing') return 'var(--state-finalizing)';
+  if (state === 'injecting') return 'var(--state-injecting)';
+  if (state === 'success') return 'var(--state-success)';
+  return 'var(--state-error)';
+}
+
+function Visualizer({ hudState, levelRef }: { hudState: HudState; levelRef: { current: number } }) {
+  const [levels, setLevels] = useState<number[]>(() => Array(COL_COUNT).fill(0.1));
 
   useEffect(() => {
     let rafId = 0;
 
     const tick = () => {
       const now = performance.now() / 1000;
-      const liveLevel = clamp01(levelRef.current);
+      const liveLevel = levelRef.current;
 
       setLevels((previous) =>
         previous.map((current, index) => {
-          const amplitude = AMPLITUDE_PROFILE[index] ?? 0.2;
-          const idle = IDLE_PROFILE[index] ?? 0.1;
-          let next = current;
+          let target = 0.1;
 
           if (hudState === 'listening') {
-            const noise = Math.sin(now * (8 + index * 0.3)) * 0.2;
-            next = clamp01(amplitude * (0.32 + liveLevel * 0.95) + noise);
-          } else if (hudState === 'finalizing') {
-            const scan = Math.sin(now * 10 - index * 0.5);
-            next = scan > 0.8 ? 0.8 : 0.1;
-          } else if (hudState === 'injecting') {
-            const scan = Math.sin(now * 12 - index * 0.5);
-            next = scan > 0.75 ? 0.9 : 0.12;
-          } else if (hudState === 'success') {
-            next = 0.3 + Math.sin(now * 4 - index * 0.2) * 0.1;
-          } else if (hudState === 'error') {
-            next = Math.random() > 0.95 ? 0.6 : 0.05;
+            const noise1 = Math.sin(now * 8 + index * 0.5) * 0.3;
+            const noise2 = Math.cos(now * 12 - index * 0.3) * 0.2;
+            target = Math.max(
+              0.1,
+              Math.max(0, 0.5 + liveLevel * 0.8 + noise1 + noise2) * CURVE_PROFILE[index],
+            );
+          } else if (hudState === 'finalizing' || hudState === 'injecting') {
+            const speed = hudState === 'injecting' ? 10 : 6;
+            const active = Math.max(
+              0,
+              1 - Math.abs((Math.sin(now * speed) + 1) / 2 - index / (COL_COUNT - 1)) * 5,
+            );
+            target = 0.15 + active * 0.6 * CURVE_PROFILE[index];
+          } else if (hudState === 'success' || hudState === 'error') {
+            target = 0.1;
           } else {
-            const drift = Math.sin(now * 2 + index) * 0.05;
-            next = Math.max(0.05, idle + drift);
+            target = 0.1 + (Math.sin(now * 2) * 0.05 + 0.05) * CURVE_PROFILE[index];
           }
 
-          const smoothing = hudState === 'listening' ? 0.35 : 0.28;
-          return current + (clamp01(next) - current) * smoothing;
+          const smoothing = hudState === 'listening' ? 0.35 : 0.25;
+          return current + (target - current) * smoothing;
         }),
       );
 
@@ -172,84 +169,40 @@ function Visualizer({
   }, [hudState, levelRef]);
 
   return (
-    <div
-      className="hud-wave-canvas"
-      style={{
-        height: `${WAVE_H}px`,
-        gap: `${COL_GAP}px`,
-      }}
-      aria-hidden
-    >
-      {levels.map((level, columnIndex) => {
-        const activeBlocks = Math.round(clamp01(level) * MAX_BLOCKS);
-
-        return (
-          <div className="hud-wave-column" style={{ gap: `${BLOCK_GAP}px` }} key={columnIndex}>
-            {Array.from({ length: MAX_BLOCKS }).map((_, blockIndex) => (
-              <div
-                key={blockIndex}
-                className="hud-wave-block"
-                style={{
-                  width: `${BLOCK_SIZE}px`,
-                  height: `${BLOCK_SIZE}px`,
-                  background: resolveBlockColor(hudState, blockIndex < activeBlocks),
-                }}
-              />
-            ))}
-          </div>
-        );
-      })}
+    <div className="hud-wave-canvas" aria-hidden>
+      {levels.map((level, i) => (
+        <div
+          key={i}
+          className="hud-wave-bar"
+          style={{
+            height: `${Math.max(3, level * 16)}px`,
+            backgroundColor: resolveBarColor(hudState, level),
+            opacity: hudState === 'success' || hudState === 'error' ? 0 : 1,
+          }}
+        />
+      ))}
     </div>
   );
 }
 
 export default function WisprHudPill() {
   const [hudState, setHudState] = useState<HudState>('idle');
-  const [durationSec, setDurationSec] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
 
   const targetLevelRef = useRef(0);
-  const timerRef = useRef<number | null>(null);
-  const startedAtRef = useRef<number | null>(null);
-
-  const stopTimer = useCallback(() => {
-    if (timerRef.current != null) {
-      window.clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  }, []);
 
   useEffect(() => {
     if (!window.voiceNoteAI) return;
 
     const offHud = window.voiceNoteAI.onHudState((payload: HudEvent) => {
-      const nextState = payload.state;
-      setHudState(nextState);
-
-      if (nextState === 'idle') {
-        setDurationSec(0);
-        startedAtRef.current = null;
-        stopTimer();
+      setHudState(payload.state);
+      if (payload.state === 'idle') {
         targetLevelRef.current = 0;
-        return;
       }
-
-      if (nextState === 'listening') {
-        setDurationSec(0);
-        startedAtRef.current = Date.now();
-        stopTimer();
-        timerRef.current = window.setInterval(() => {
-          if (!startedAtRef.current) return;
-          setDurationSec(Math.floor((Date.now() - startedAtRef.current) / 1000));
-        }, 500);
-        return;
-      }
-
-      stopTimer();
     });
 
     const offLevel = window.voiceNoteAI.onHudLevel((payload: HudLevelEvent) => {
-      targetLevelRef.current = clamp01(Number(payload.level) || 0);
+      targetLevelRef.current = Math.max(0, Math.min(1, Number(payload.level) || 0));
     });
 
     const offHover =
@@ -263,33 +216,30 @@ export default function WisprHudPill() {
       offHud();
       offLevel();
       offHover();
-      stopTimer();
     };
-  }, [stopTimer]);
+  }, []);
 
   const isExpanded = hudState !== 'idle' || isHovered;
-  const idleHoveredClass = hudState === 'idle' && isHovered ? 'hovered' : '';
 
   return (
     <div className="hud-root">
       <div className="hud-stage">
         <div className={`hud-frame state-${hudState} ${isExpanded ? 'expanded' : ''}`.trim()}>
           <div
-            className={`hud-pill state-${hudState} ${isExpanded ? 'expanded' : ''} ${idleHoveredClass}`.trim()}
+            className={`hud-pill state-${hudState} ${isExpanded ? 'expanded' : ''}`.trim()}
+            onMouseEnter={() => hudState === 'idle' && setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
           >
-            <div className="pill-content-wrapper">
+            <div className="hud-mic-container">
               <div className="hud-mic" aria-hidden>
-                <IconMic hudState={hudState} />
+                <IconMic state={hudState} />
               </div>
-              <div className="hud-dot" />
+            </div>
+
+            <div className="pill-content-wrapper">
+              <span className="hud-label-compact">{resolveLabel(hudState)}</span>
               <Visualizer hudState={hudState} levelRef={targetLevelRef} />
             </div>
-          </div>
-          <div className="hud-label-group">
-            <span className="hud-label" aria-live="polite">
-              {resolveLabel(hudState)}
-            </span>
-            <span className="hud-meta">{resolveMeta(hudState, durationSec)}</span>
           </div>
         </div>
       </div>

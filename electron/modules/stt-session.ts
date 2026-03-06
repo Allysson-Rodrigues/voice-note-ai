@@ -1,12 +1,13 @@
 import type { BrowserWindow, IpcMain } from 'electron';
 import {
-    MAX_PCM_CHUNK_BYTES,
-    MIN_AUDIO_CHUNK_INTERVAL_MS,
-    validateSttAudioPayload,
-    validateSttStartPayload,
-    validateSttStopPayload,
+  MAX_PCM_CHUNK_BYTES,
+  MIN_AUDIO_CHUNK_INTERVAL_MS,
+  validateSttAudioPayload,
+  validateSttStartPayload,
+  validateSttStopPayload,
 } from '../ipc-validation.js';
 import { logInfo, logPerf, logWarn } from '../logger.js';
+import { getAzureConfigMissingMessage } from './health-check.js';
 import type { AppSettings, LanguageMode } from '../settings-store.js';
 import type { InjectResult } from './text-injection.js';
 
@@ -24,10 +25,77 @@ type HudState = {
   message?: string;
 };
 
+type SpeechRecognitionResultPayload = {
+  text?: string;
+  json?: string;
+};
+
+type SpeechRecognitionEvent = {
+  result?: SpeechRecognitionResultPayload;
+  reason?: unknown;
+  errorDetails?: unknown;
+};
+
+type SpeechRecognizer = {
+  recognizing?: (sender: unknown, event: SpeechRecognitionEvent) => void;
+  recognized?: (sender: unknown, event: SpeechRecognitionEvent) => void;
+  canceled?: (sender: unknown, event: SpeechRecognitionEvent) => void;
+  sessionStopped?: () => void;
+  startContinuousRecognitionAsync: (
+    onSuccess: () => void,
+    onError: (error: unknown) => void,
+  ) => void;
+  stopContinuousRecognitionAsync: (
+    onSuccess: () => void,
+    onError: (error: unknown) => void,
+  ) => void;
+  close: () => void;
+};
+
+type PushAudioStream = {
+  write: (chunk: Buffer) => void;
+  close: () => void;
+};
+
+type SpeechConfig = {
+  speechRecognitionLanguage: string;
+  setProperty: (propertyId: unknown, value: string) => void;
+  outputFormat?: unknown;
+};
+
+type PhraseListGrammar = {
+  addPhrase: (phrase: string) => void;
+};
+
+type SpeechSdkModule = {
+  SpeechConfig: {
+    fromSubscription: (key: string, region: string) => SpeechConfig;
+  };
+  PropertyId?: {
+    SpeechServiceResponse_PostProcessingOption?: unknown;
+  };
+  OutputFormat?: {
+    Detailed: unknown;
+  };
+  AudioStreamFormat: {
+    getWaveFormatPCM: (sampleRate: number, bitsPerSample: number, channels: number) => unknown;
+  };
+  AudioInputStream: {
+    createPushStream: (streamFormat: unknown) => PushAudioStream;
+  };
+  AudioConfig: {
+    fromStreamInput: (stream: PushAudioStream) => unknown;
+  };
+  SpeechRecognizer: new (speechConfig: SpeechConfig, audioConfig: unknown) => SpeechRecognizer;
+  PhraseListGrammar?: {
+    fromRecognizer: (recognizer: SpeechRecognizer) => PhraseListGrammar;
+  };
+};
+
 type SttSlot = {
   language: string;
-  recognizer: any;
-  pushStream: any;
+  recognizer: SpeechRecognizer;
+  pushStream: PushAudioStream;
   transcriptFinal: string;
   bestConfidence: number | null;
   ready: boolean;
@@ -56,6 +124,7 @@ type SttSession = {
 };
 
 type SttSessionManagerOptions = {
+  isPackagedApp: boolean;
   getSettings: () => AppSettings;
   getCaptureBlockedReason: () => string | null | undefined;
   broadcast: (channel: string, payload: unknown) => void;
@@ -91,11 +160,13 @@ type SttSessionManagerOptions = {
       mode?: string;
     };
   }) => Promise<void> | void;
-  getAppProfile?: (appKey: string | null) => {
-    injectionMethod?: string;
-    languageBias?: 'pt-BR' | 'en-US' | 'mixed';
-    postprocessProfile?: 'safe' | 'balanced' | 'aggressive';
-  } | undefined;
+  getAppProfile?: (appKey: string | null) =>
+    | {
+        injectionMethod?: string;
+        languageBias?: 'pt-BR' | 'en-US' | 'mixed';
+        postprocessProfile?: 'safe' | 'balanced' | 'aggressive';
+      }
+    | undefined;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -116,7 +187,7 @@ function normalizeWhitespace(text: string) {
 }
 
 export function createSttSessionManager(options: SttSessionManagerOptions) {
-  let cachedSpeechSDK: any | null = null;
+  let cachedSpeechSDK: SpeechSdkModule | null = null;
   let phraseCache: string[] | null = null;
   let phraseCacheDirty = true;
   let lastPhraseBoostCount = 0;
@@ -185,7 +256,9 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
 
   async function getSpeechSdk() {
     if (cachedSpeechSDK) return cachedSpeechSDK;
-    const mod: any = await import('microsoft-cognitiveservices-speech-sdk');
+    const mod = (await import('microsoft-cognitiveservices-speech-sdk')) as unknown as {
+      default?: SpeechSdkModule;
+    } & SpeechSdkModule;
     cachedSpeechSDK = mod.default ?? mod;
     return cachedSpeechSDK;
   }
@@ -246,9 +319,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     const region = (process.env.AZURE_SPEECH_REGION ?? '').trim();
     const language = process.env.AZURE_SPEECH_LANGUAGE ?? 'pt-BR';
     if (!key || !region) {
-      throw new Error(
-        'Azure STT nao configurado: defina AZURE_SPEECH_KEY e AZURE_SPEECH_REGION em .env.local.',
-      );
+      throw new Error(getAzureConfigMissingMessage({ isPackaged: options.isPackagedApp }));
     }
     return { key, region, language };
   }
@@ -301,7 +372,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
   }
 
   function createRecognizerSlot(
-    SpeechSDK: any,
+    SpeechSDK: SpeechSdkModule,
     language: string,
     key: string,
     region: string,
@@ -435,7 +506,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     return Date.now() - session.startedAtMs;
   }
 
-  function canRetrySession(session: SttSession, event: any) {
+  function canRetrySession(session: SttSession, event: SpeechRecognitionEvent) {
     if (session.ending) return false;
     if (session.retryCount >= 1) return false;
     if (sessionAgeMs(session) >= 30_000) return false;
@@ -480,7 +551,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     }
   }
 
-  async function attemptSessionRetry(session: SttSession, event: any) {
+  async function attemptSessionRetry(session: SttSession, event: SpeechRecognitionEvent) {
     if (!canRetrySession(session, event)) return false;
 
     session.retryCount += 1;
@@ -504,7 +575,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
 
     return await new Promise<{ text: string; confidence: number | null; language: string }>(
       (resolve, reject) => {
-        slot.recognizer.recognized = (_: unknown, event: any) => {
+        slot.recognizer.recognized = (_: unknown, event: SpeechRecognitionEvent) => {
           const text = event?.result?.text ?? '';
           if (text) {
             slot.transcriptFinal = `${slot.transcriptFinal}${slot.transcriptFinal ? ' ' : ''}${text}`;
@@ -516,7 +587,9 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
             const confidence = parsed?.NBest?.[0]?.Confidence;
             if (typeof confidence === 'number' && Number.isFinite(confidence)) {
               slot.bestConfidence =
-                slot.bestConfidence == null ? confidence : Math.max(slot.bestConfidence, confidence);
+                slot.bestConfidence == null
+                  ? confidence
+                  : Math.max(slot.bestConfidence, confidence);
             }
           } catch {
             // ignore
@@ -543,29 +616,29 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
           void finalize();
         };
 
-        slot.recognizer.startContinuousRecognitionAsync(
-          () => {
-            for (const chunk of session.audioRing) {
-              slot.pushStream.write(chunk);
-            }
-            slot.pushStream.close();
-            try {
-              slot.recognizer.stopContinuousRecognitionAsync(() => undefined, reject);
-            } catch (error) {
-              reject(error);
-            }
-          },
-          reject,
-        );
+        slot.recognizer.startContinuousRecognitionAsync(() => {
+          for (const chunk of session.audioRing) {
+            slot.pushStream.write(chunk);
+          }
+          slot.pushStream.close();
+          try {
+            slot.recognizer.stopContinuousRecognitionAsync(() => undefined, reject);
+          } catch (error) {
+            reject(error);
+          }
+        }, reject);
       },
     );
   }
 
-  async function maybeResolveFallbackTranscript(session: SttSession, initial: {
-    text: string;
-    confidence: number;
-    language: string;
-  }) {
+  async function maybeResolveFallbackTranscript(
+    session: SttSession,
+    initial: {
+      text: string;
+      confidence: number;
+      language: string;
+    },
+  ) {
     const settings = options.getSettings();
     if (settings.languageMode !== 'dual') return initial;
     if (settings.dualLanguageStrategy !== 'fallback-on-low-confidence') return initial;
@@ -575,7 +648,10 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
     const fallback = await transcribeAudioRingWithLanguage(session, 'en-US').catch(() => null);
     if (!fallback?.text) return initial;
     const fallbackConfidence = fallback.confidence ?? -1;
-    if (fallbackConfidence > initial.confidence || fallback.text.length > initial.text.length + 12) {
+    if (
+      fallbackConfidence > initial.confidence ||
+      fallback.text.length > initial.text.length + 12
+    ) {
       logInfo('using fallback transcript language', {
         sessionId: session.sessionId,
         from: initial.language,
@@ -679,7 +755,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
   }
 
   function attachSlotHandlers(session: SttSession, slot: SttSlot, isPrimary: boolean) {
-    slot.recognizer.recognizing = (_: unknown, event: any) => {
+    slot.recognizer.recognizing = (_: unknown, event: SpeechRecognitionEvent) => {
       if (!isPrimary) return;
       const text = event?.result?.text ?? '';
       if (!text) return;
@@ -695,7 +771,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
       options.broadcast('stt:partial', { sessionId: session.sessionId, text });
     };
 
-    slot.recognizer.recognized = (_: unknown, event: any) => {
+    slot.recognizer.recognized = (_: unknown, event: SpeechRecognitionEvent) => {
       const text = event?.result?.text ?? '';
       if (text) {
         slot.transcriptFinal = `${slot.transcriptFinal}${slot.transcriptFinal ? ' ' : ''}${text}`;
@@ -715,7 +791,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
       }
     };
 
-    slot.recognizer.canceled = (_: unknown, event: any) => {
+    slot.recognizer.canceled = (_: unknown, event: SpeechRecognitionEvent) => {
       void (async () => {
         if (!activeSession || activeSession.sessionId !== session.sessionId) return;
         if (session.ending) return;
@@ -783,7 +859,7 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
       let session: SttSession | null = null;
 
       try {
-        let SpeechSDK: any = null;
+        let SpeechSDK: SpeechSdkModule | null = null;
         let key = '';
         let region = '';
         let phrases: string[] = [];
@@ -904,12 +980,13 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
       // E se estivesse 'presa' e quisermos forçar parada independentemente do ID de payload,
       // podemos permitir matar a ativa se o payload.sessionId == "force"
       if (payload.sessionId === 'force' && activeSession) {
-         logWarn('forçando parada da sessão ativa que ficou presa', { sessionId: activeSession.sessionId });
+        logWarn('forçando parada da sessão ativa que ficou presa', {
+          sessionId: activeSession.sessionId,
+        });
       } else {
-         return { ok: false };
+        return { ok: false };
       }
     }
-
 
     const session = activeSession;
     session.ending = true;
@@ -1023,25 +1100,19 @@ export function createSttSessionManager(options: SttSessionManagerOptions) {
   }
 
   function registerIpcHandlers(ipcMain: IpcMain) {
-    ipcMain.handle(
-      'stt:start',
-      async (event, payload: unknown) => {
-        return await startSttSession(event.sender, validateSttStartPayload(payload));
-      },
-    );
+    ipcMain.handle('stt:start', async (event, payload: unknown) => {
+      return await startSttSession(event.sender, validateSttStartPayload(payload));
+    });
 
-    ipcMain.on(
-      'stt:audio',
-      (_event, payload: unknown) => {
-        try {
-          onAudioChunk(validateSttAudioPayload(payload));
-        } catch (error) {
-          logWarn('rejected invalid stt audio payload', {
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      },
-    );
+    ipcMain.on('stt:audio', (_event, payload: unknown) => {
+      try {
+        onAudioChunk(validateSttAudioPayload(payload));
+      } catch (error) {
+        logWarn('rejected invalid stt audio payload', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
 
     ipcMain.handle('stt:stop', async (_event, payload: unknown) => {
       return await stopSession(validateSttStopPayload(payload));

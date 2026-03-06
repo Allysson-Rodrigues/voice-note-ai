@@ -7,21 +7,30 @@ const WindowTitleBar = () => {
 
   useEffect(() => {
     if (!hasDesktopApi) return;
-    void window.voiceNoteAI.isWindowMaximized().then(setIsMaximized);
+    if (typeof window.voiceNoteAI.isWindowMaximized === 'function') {
+      void window.voiceNoteAI.isWindowMaximized().then(setIsMaximized);
+    }
+    if (typeof window.voiceNoteAI.onMaximizedChange !== 'function') return;
     const off = window.voiceNoteAI.onMaximizedChange(setIsMaximized);
     return off;
   }, [hasDesktopApi]);
 
   const onMinimize = useCallback(() => {
-    if (hasDesktopApi) window.voiceNoteAI.windowMinimize();
+    if (hasDesktopApi && typeof window.voiceNoteAI.windowMinimize === 'function') {
+      window.voiceNoteAI.windowMinimize();
+    }
   }, [hasDesktopApi]);
 
   const onMaximize = useCallback(() => {
-    if (hasDesktopApi) window.voiceNoteAI.windowMaximize();
+    if (hasDesktopApi && typeof window.voiceNoteAI.windowMaximize === 'function') {
+      window.voiceNoteAI.windowMaximize();
+    }
   }, [hasDesktopApi]);
 
   const onClose = useCallback(() => {
-    if (hasDesktopApi) window.voiceNoteAI.windowClose();
+    if (hasDesktopApi && typeof window.voiceNoteAI.windowClose === 'function') {
+      window.voiceNoteAI.windowClose();
+    }
   }, [hasDesktopApi]);
 
   if (!hasDesktopApi) return null;

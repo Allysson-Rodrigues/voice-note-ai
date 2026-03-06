@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getHealthCheckReport } from './health-check.js';
+import { getAzureConfigMissingMessage, getHealthCheckReport } from './health-check.js';
 
 describe('health check', () => {
   it('includes security status for strict runtime hardening', async () => {
@@ -24,7 +24,14 @@ describe('health check', () => {
 
     const security = report.items.find((item) => item.id === 'security');
     expect(security?.status).toBe('ok');
-    expect(security?.message).toContain('CSP runtime ativa');
+    expect(security?.message).toContain('CSP em tempo de execução ativa');
     expect(security?.message).toContain('default deny');
+  });
+
+  it('adapts the Azure guidance for installed apps', () => {
+    expect(getAzureConfigMissingMessage()).toContain('.env.local');
+    expect(getAzureConfigMissingMessage({ isPackaged: true })).toContain(
+      'variáveis de ambiente do sistema',
+    );
   });
 });

@@ -3,12 +3,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 type HudState = 'idle' | 'listening' | 'finalizing' | 'injecting' | 'success' | 'error';
 
 const LABEL_BY_STATE: Record<HudState, string> = {
-  idle: 'IDLE',
-  listening: 'LISTENING',
-  finalizing: 'FINALIZING',
-  injecting: 'INJECTING',
-  success: 'SUCCESS',
-  error: 'ERROR',
+  idle: 'EM ESPERA',
+  listening: 'OUVINDO',
+  finalizing: 'FINALIZANDO',
+  injecting: 'INSERINDO',
+  success: 'CONCLUÍDO',
+  error: 'ERRO',
 };
 
 function clamp(value: number, min: number, max: number) {

@@ -54,32 +54,32 @@ const DictionaryTab = memo(function DictionaryTab({
     <div className="space-y-6">
       <Card className="border-border bg-card shadow-sm overflow-hidden">
         <CardHeader className="border-b border-border/40 bg-muted/20 pb-5">
-          <CardTitle className="text-lg font-medium text-foreground">Dicionário Primário</CardTitle>
+          <CardTitle className="text-lg font-medium text-foreground">Vocabulário personalizado</CardTitle>
           <CardDescription>
-            Refine a engine de STT para reconhecer termos complexos ou jargões.
+            Ajude a transcrição a reconhecer nomes, siglas e jargões do seu contexto.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6 pt-6">
           {!dictionaryAvailable && (
             <div className="rounded-2xl border border-destructive/20 bg-destructive/10 p-4 text-sm text-destructive">
-              Indisponível. Reinicie o App Desktop.
+              Recurso indisponível. Reinicie o aplicativo desktop.
             </div>
           )}
 
           <div className="rounded-2xl border border-border/40 bg-muted/20 p-5">
             <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-              Adicionar Novo Termo
+              Adicionar termo
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <Input
-                placeholder="Termo em inglês (ex: Tailwind)"
+                placeholder="Termo ou nome importante (ex: Supabase)"
                 value={newTerm}
                 onChange={(e) => onSetNewTerm(e.target.value)}
                 disabled={!hasDesktopApi || dictionaryBusy || !dictionaryAvailable}
                 className="h-11 rounded-xl border-border/50 bg-background px-4 text-foreground placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
               />
               <Input
-                placeholder="Hint de pronúncia PT (opcional)"
+                placeholder="Dica de pronúncia em PT-BR (opcional)"
                 value={newHintPt}
                 onChange={(e) => onSetNewHintPt(e.target.value)}
                 disabled={!hasDesktopApi || dictionaryBusy || !dictionaryAvailable}
@@ -92,7 +92,7 @@ const DictionaryTab = memo(function DictionaryTab({
                 onClick={onAddDictionaryTerm}
                 disabled={!hasDesktopApi || dictionaryBusy || !dictionaryAvailable}
               >
-                Salvar Regra
+                Salvar termo
               </Button>
               <Button
                 variant="outline"
@@ -100,19 +100,19 @@ const DictionaryTab = memo(function DictionaryTab({
                 onClick={onDictionaryReload}
                 disabled={!hasDesktopApi || dictionaryBusy || !dictionaryAvailable}
               >
-                Recarregar
+                Atualizar lista
               </Button>
             </div>
           </div>
 
           <div className="space-y-3">
             <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2 px-1">
-              Termos Cadastrados
+              Termos cadastrados
             </div>
             <div className="max-h-[350px] space-y-3 overflow-y-auto pr-2 custom-scrollbar">
               {dictionary.length === 0 ? (
                 <div className="rounded-2xl border border-border/30 bg-muted/10 p-8 text-sm text-muted-foreground/60 text-center italic">
-                  Nenhum termo cadastrado no dicionário primário.
+                  Nenhum termo cadastrado no vocabulário personalizado.
                 </div>
               ) : (
                 dictionary.map((item) => (
@@ -155,16 +155,16 @@ const DictionaryTab = memo(function DictionaryTab({
       <Card className="border-border bg-card shadow-sm overflow-hidden">
         <CardHeader className="border-b border-border/40 bg-muted/20 pb-5">
           <CardTitle className="text-lg font-medium text-foreground">
-            Correções Pós-Processamento
+            Correções inteligentes de texto
           </CardTitle>
           <CardDescription>
-            Normalização textual exata (RegEx e Case Matching).
+            Ajuste automaticamente palavras e expressões depois da transcrição.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6 pt-6">
           <div className="rounded-2xl border border-border/40 bg-muted/20 p-5">
             <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-              Nova Correção Textual
+              Nova correção
             </div>
             <div className="grid gap-4 sm:grid-cols-[1fr_1fr_auto]">
               <Input
@@ -186,7 +186,7 @@ const DictionaryTab = memo(function DictionaryTab({
                 onClick={onAddCanonicalTerm}
                 disabled={!hasDesktopApi || dictionaryBusy}
               >
-                Adicionar
+                Adicionar regra
               </Button>
             </div>
           </div>
@@ -195,7 +195,7 @@ const DictionaryTab = memo(function DictionaryTab({
             <div className="max-h-[300px] space-y-3 overflow-y-auto pr-2 custom-scrollbar">
               {canonicalTerms.length === 0 ? (
                 <div className="rounded-2xl border border-border/30 bg-muted/10 p-8 text-sm text-muted-foreground/60 text-center italic">
-                  Nenhuma correção pós-processo.
+                  Nenhuma correção inteligente cadastrada.
                 </div>
               ) : (
                 canonicalTerms.map((item, index) => (

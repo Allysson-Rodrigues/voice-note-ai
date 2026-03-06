@@ -11,6 +11,11 @@ describe('Index smoke', () => {
       items: [],
     }));
     const api = {
+      windowMinimize: () => {},
+      windowMaximize: () => {},
+      windowClose: () => {},
+      isWindowMaximized: async () => false,
+      onMaximizedChange: () => () => {},
       listDictionary,
       exportDictionary: async () => ({ exportedAt: new Date().toISOString(), terms: [] }),
       importDictionary: async () => ({ ok: true, count: 0 }),
@@ -93,8 +98,8 @@ describe('Index smoke', () => {
 
     render(<Index />);
 
-    expect(screen.getByRole('tab', { name: 'Dicionário' })).toBeInTheDocument();
-    expect((await screen.findAllByText(/dite em qualquer app/i)).length).toBeGreaterThan(0);
+    expect(screen.getByRole('tab', { name: 'Vocabulário' })).toBeInTheDocument();
+    expect((await screen.findAllByText(/dite em qualquer aplicativo/i)).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Ctrl+Win').length).toBeGreaterThan(0);
     expect(screen.getByRole('tab', { name: 'Configurações' })).toBeInTheDocument();
     expect(listDictionary).not.toHaveBeenCalled();
@@ -110,6 +115,11 @@ describe('Index smoke', () => {
       items: [],
     }));
     const api = {
+      windowMinimize: () => {},
+      windowMaximize: () => {},
+      windowClose: () => {},
+      isWindowMaximized: async () => false,
+      onMaximizedChange: () => () => {},
       listDictionary,
       exportDictionary: async () => ({ exportedAt: new Date().toISOString(), terms: [] }),
       importDictionary: async () => ({ ok: true, count: 0 }),
@@ -192,7 +202,7 @@ describe('Index smoke', () => {
 
     render(<Index />);
 
-    const dictionaryTab = screen.getByTitle('Dicionário');
+    const dictionaryTab = screen.getByTitle('Vocabulário');
     fireEvent.mouseDown(dictionaryTab);
     fireEvent.click(dictionaryTab);
     await waitFor(() => expect(dictionaryTab).toHaveAttribute('aria-selected', 'true'));

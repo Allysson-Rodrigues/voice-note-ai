@@ -28,8 +28,8 @@ import {
 } from './ipc-validation.js';
 import { getRecentLogs, logError, logInfo } from './logger.js';
 import {
-  AZURE_CONFIG_MISSING_MESSAGE,
   getAzureConfigError,
+  getAzureConfigMissingMessage,
   getHealthCheckReport,
 } from './modules/health-check.js';
 import { createHotkeyService } from './modules/hotkey.js';
@@ -54,6 +54,8 @@ dotenv.config({ path: path.join(process.cwd(), '.env') });
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const IS_DEV = Boolean(DEV_SERVER_URL);
+const APP_ID = 'com.antigravity.vox-type';
+const APP_NAME = 'Vox Type';
 const PRIMARY_HOTKEY = process.env.VOICE_HOTKEY ?? 'CommandOrControl+Super';
 const FALLBACK_HOTKEY = process.env.VOICE_HOTKEY_FALLBACK ?? 'CommandOrControl+Super+Space';
 const HOLD_TO_TALK_ENABLED = (process.env.VOICE_HOLD_TO_TALK ?? '1') !== '0';
@@ -200,7 +202,7 @@ function emitAppError(message: string) {
     mainWindow.webContents.send('app:error', { message });
   }
   if (tray) {
-    tray.setToolTip(`Voice Note AI - ${message}`);
+    tray.setToolTip(`${APP_NAME} - ${message}`);
   }
 }
 
@@ -227,9 +229,11 @@ function setRuntimeBlocked(reason?: string) {
 
 function resolveCaptureBlockedReason() {
   const existing = runtimeInfo.captureBlockedReason;
-  if (existing && existing !== AZURE_CONFIG_MISSING_MESSAGE) return existing;
+  if (existing && existing !== getAzureConfigMissingMessage({ isPackaged: app.isPackaged })) {
+    return existing;
+  }
 
-  return getAzureConfigError();
+  return getAzureConfigError({ isPackaged: app.isPackaged });
 }
 
 function refreshCaptureBlockedReason() {
@@ -331,6 +335,7 @@ async function postprocessTranscript(rawText: string) {
 }
 
 const sttManager = createSttSessionManager({
+  isPackagedApp: app.isPackaged,
   getSettings: () => settings,
   getCaptureBlockedReason: () => refreshCaptureBlockedReason(),
   broadcast,
@@ -418,6 +423,7 @@ ipcMain.handle('app:runtime-info', async () => {
 ipcMain.handle('app:health-check', async () => {
   refreshCaptureBlockedReason();
   return await getHealthCheckReport({
+    isPackagedApp: app.isPackaged,
     holdToTalkEnabled: HOLD_TO_TALK_ENABLED,
     holdHookActive: Boolean(hotkeyService.getStopHoldHook()),
     perfSummary: await getPerfStore().getSummary(),
@@ -534,7 +540,7 @@ function ensureTray() {
   if (!iconPath) return;
 
   tray = new Tray(iconPath);
-  tray.setToolTip('Voice Note AI');
+  tray.setToolTip(APP_NAME);
 
   tray.on('click', () => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -549,7 +555,7 @@ function ensureTray() {
     const mainVisible = Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible());
     const menu = Menu.buildFromTemplate([
       {
-        label: mainVisible ? 'Hide' : 'Show',
+        label: mainVisible ? 'Ocultar' : 'Mostrar',
         click: () => {
           if (mainVisible) mainWindow?.hide();
           else {
@@ -560,7 +566,7 @@ function ensureTray() {
       },
       { type: 'separator' },
       {
-        label: hudController.isHudVisible() ? 'Hide HUD' : 'Show HUD',
+        label: hudController.isHudVisible() ? 'Ocultar HUD' : 'Mostrar HUD',
         click: () => {
           hudController.setHudVisible(!hudController.isHudVisible());
           rebuildMenu();
@@ -568,7 +574,7 @@ function ensureTray() {
       },
       { type: 'separator' },
       {
-        label: 'Quit',
+        label: 'Sair',
         click: () => {
           isQuitting = true;
           try {
@@ -594,7 +600,7 @@ function ensureTray() {
 
 async function bootstrap() {
   if (process.platform === 'win32') {
-    app.setAppUserModelId('com.antigravity.voice-note-ai');
+    app.setAppUserModelId(APP_ID);
   }
 
   runtimeSecurity = installSessionSecurity(session.defaultSession, DEV_SERVER_URL);
@@ -670,7 +676,7 @@ async function bootstrap() {
   }
 
   const startupBlockedReason = refreshCaptureBlockedReason();
-  if (startupBlockedReason === AZURE_CONFIG_MISSING_MESSAGE) {
+  if (startupBlockedReason === getAzureConfigMissingMessage({ isPackaged: app.isPackaged })) {
     emitAppError(startupBlockedReason);
     setHudState({ state: 'error', message: startupBlockedReason });
   }

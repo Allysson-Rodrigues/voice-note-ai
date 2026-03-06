@@ -1,4 +1,4 @@
-# Voice Note AI (Windows-first, personal use)
+# Vox Type (Windows-first, personal use)
 
 Universal dictation app (Electron) with a global hotkey that:
 
@@ -6,7 +6,8 @@ Universal dictation app (Electron) with a global hotkey that:
 - streams 16kHz mono PCM to Azure Speech-to-Text
 - copies final text to the clipboard
 - on Windows, tries automatic paste via `WM_PASTE` (target/foreground handle), with `Ctrl+V` and `Shift+Insert` fallback
-- shows an always-on-top transparent HUD window (`hud.html`)
+- shows an always-on-top transparent HUD window (`hud.html`) above the taskbar, centered at the bottom of the active display
+- keeps local history with optional privacy mode and encrypted storage
 
 ## Setup (dev)
 
@@ -33,7 +34,7 @@ For the installed Windows app, configure variables in the OS environment (not on
    - `AZURE_SPEECH_REGION` (for example: `brazilsouth`)
    - optional: `AZURE_SPEECH_LANGUAGE=pt-BR`
 3. Fully close the app from tray (**Quit**) and sign out/sign in again (or restart Windows Explorer).
-4. Reopen the app and run **Health Check**.
+4. Reopen the app and run **Health Check** from the **Capture** tab.
 
 Note: in the packaged `.exe`, `.env.local` is not the most reliable runtime source for end-user variables.
 
@@ -76,7 +77,7 @@ cd C:\Users\allys\dev\voice-note-ai
 
 Expected output (`release/` folder):
 
-- `Voice Note AI-Setup-1.0.0.exe`
+- `Vox Type-Setup-1.0.3.exe`
 - auxiliary artifacts (`latest.yml`, `.blockmap`) for future auto-update
 
 Notes:
@@ -86,7 +87,7 @@ Notes:
 - To run the installer from PowerShell, use quotes because of spaces in filename:
 
 ```powershell
-& ".\release\Voice Note AI-Setup-1.0.0.exe"
+& ".\release\Vox Type-Setup-1.0.3.exe"
 ```
 
 ## Version update (patch/minor/major)
@@ -170,6 +171,9 @@ Update notes:
 - Default settings:
   - history enabled
   - retention: 30 days
+- Optional protections:
+  - **Privacy mode** disables local history persistence
+  - **Encrypted** history storage uses `safeStorage` when available
 - Supported operations:
   - text search
   - copy transcription
@@ -246,7 +250,7 @@ Post-sync checklist:
   - `AZURE_SPEECH_REGION`
   - optional: `AZURE_SPEECH_LANGUAGE` (default: `pt-BR`)
   - optional: `VOICE_PHRASES` (comma-separated hints for slang/English/app names)
-- `VOICE_HUD` (default: `1`) shows always-on-top indicator in bottom-right corner
+- `VOICE_HUD` (default: `1`) shows always-on-top indicator centered near the bottom edge of the current display
 - `VOICE_HUD_DEBUG=1` turns HUD into normal debug window (frame/devtools)
 - `VOICE_MAX_SESSION_SECONDS` (default: `90`)
 - `VOICE_HISTORY_ENABLED` (default: `1`) enables local history

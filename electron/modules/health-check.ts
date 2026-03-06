@@ -1,8 +1,17 @@
 import { lookup as lookupDns, resolve as resolveDns } from 'node:dns/promises';
 import type { PerfSummary } from '../perf-store.js';
 
-export const AZURE_CONFIG_MISSING_MESSAGE =
-  'Azure STT nao configurado: defina AZURE_SPEECH_KEY e AZURE_SPEECH_REGION em .env.local.';
+type AzureConfigErrorOptions = {
+  isPackaged?: boolean;
+};
+
+export function getAzureConfigMissingMessage(options: AzureConfigErrorOptions = {}) {
+  if (options.isPackaged) {
+    return 'Azure STT não configurado: defina AZURE_SPEECH_KEY e AZURE_SPEECH_REGION nas variáveis de ambiente do sistema e reabra o aplicativo.';
+  }
+
+  return 'Azure STT não configurado: defina AZURE_SPEECH_KEY e AZURE_SPEECH_REGION no arquivo .env.local.';
+}
 
 export type HealthStatus = 'ok' | 'warn' | 'error';
 
@@ -17,24 +26,24 @@ export type HealthCheckReport = {
   items: HealthCheckItem[];
 };
 
-export function getAzureConfigError() {
+export function getAzureConfigError(options: AzureConfigErrorOptions = {}) {
   const key = (process.env.AZURE_SPEECH_KEY ?? '').trim();
   const region = (process.env.AZURE_SPEECH_REGION ?? '').trim();
-  if (!key || !region) return AZURE_CONFIG_MISSING_MESSAGE;
+  if (!key || !region) return getAzureConfigMissingMessage(options);
   return null;
 }
 
-function getSttConfigError() {
-  return getAzureConfigError();
+function getSttConfigError(options: AzureConfigErrorOptions = {}) {
+  return getAzureConfigError(options);
 }
 
-async function checkNetworkHealth(): Promise<HealthCheckItem> {
-  const providerError = getSttConfigError();
+async function checkNetworkHealth(options: AzureConfigErrorOptions = {}): Promise<HealthCheckItem> {
+  const providerError = getSttConfigError(options);
   if (providerError) {
     return {
       id: 'network',
       status: 'warn',
-      message: 'Sem configuracao valida. Teste de rede para STT foi ignorado.',
+      message: 'Configuração do Azure ausente. O teste de rede do STT foi ignorado.',
     };
   }
 
@@ -46,7 +55,7 @@ async function checkNetworkHealth(): Promise<HealthCheckItem> {
     return {
       id: 'network',
       status: 'ok',
-      message: `Rede OK (${host}).`,
+      message: `Conectividade com o Azure validada (${host}).`,
     };
   } catch (lookupError) {
     try {
@@ -54,7 +63,7 @@ async function checkNetworkHealth(): Promise<HealthCheckItem> {
       return {
         id: 'network',
         status: 'ok',
-        message: `Rede OK (${host}).`,
+        message: `Conectividade com o Azure validada (${host}).`,
       };
     } catch {
       try {
@@ -62,7 +71,7 @@ async function checkNetworkHealth(): Promise<HealthCheckItem> {
         return {
           id: 'network',
           status: 'ok',
-          message: `Rede OK (${host}).`,
+          message: `Conectividade com o Azure validada (${host}).`,
         };
       } catch {
         const code =
@@ -75,7 +84,7 @@ async function checkNetworkHealth(): Promise<HealthCheckItem> {
         return {
           id: 'network',
           status: 'error',
-          message: `Falha ao resolver ${host}${code ? ` (${code})` : ''}. Verifique conexao, DNS ou firewall.`,
+          message: `Não foi possível resolver ${host}${code ? ` (${code})` : ''}. Verifique internet, DNS ou firewall.`,
         };
       }
     }
@@ -90,8 +99,7 @@ function checkHookHealth(args: {
     return {
       id: 'hook',
       status: 'warn',
-      message:
-        'Hook global de hold-to-talk e prioritario no Windows. Modo atual usa toggle/fallback.',
+      message: 'O atalho global prioritário existe no Windows. Neste ambiente o app usa modo alternativo.',
     };
   }
 
@@ -99,7 +107,7 @@ function checkHookHealth(args: {
     return {
       id: 'hook',
       status: 'warn',
-      message: 'VOICE_HOLD_TO_TALK esta desativado.',
+      message: 'O modo segurar para falar está desativado pela configuração atual.',
     };
   }
 
@@ -107,18 +115,19 @@ function checkHookHealth(args: {
     return {
       id: 'hook',
       status: 'error',
-      message: 'Hook global indisponivel. Execute a recuperacao automatica.',
+      message: 'O atalho global não carregou. Use a recuperação automática para restaurar o PTT.',
     };
   }
 
   return {
     id: 'hook',
     status: 'ok',
-    message: 'Hook global ativo.',
+    message: 'Atalho global ativo e pronto para captura.',
   };
 }
 
 export async function getHealthCheckReport(args: {
+  isPackagedApp?: boolean;
   holdToTalkEnabled: boolean;
   holdHookActive: boolean;
   perfSummary?: PerfSummary;
@@ -140,48 +149,50 @@ export async function getHealthCheckReport(args: {
     trustedOrigins: string[];
   };
 }): Promise<HealthCheckReport> {
-  const sttError = getSttConfigError();
+  const sttError = getSttConfigError({ isPackaged: args.isPackagedApp });
   const sttItem: HealthCheckItem = sttError
     ? { id: 'stt', status: 'error', message: sttError }
-    : { id: 'stt', status: 'ok', message: 'Azure STT configurado.' };
+    : { id: 'stt', status: 'ok', message: 'Azure Speech-to-Text configurado corretamente.' };
 
   const hookItem = checkHookHealth({
     holdToTalkEnabled: args.holdToTalkEnabled,
     holdHookActive: args.holdHookActive,
   });
-  const networkItem = await checkNetworkHealth();
+  const networkItem = await checkNetworkHealth({ isPackaged: args.isPackagedApp });
   const historyItem: HealthCheckItem = {
     id: 'history',
     status: args.privacyMode || args.historyStorageMode === 'plain' ? 'warn' : 'ok',
     message: args.privacyMode
-      ? 'Modo privado ativo; historico local nao sera salvo.'
+      ? 'Modo privado ativo. O aplicativo não vai salvar transcrições no histórico local.'
       : args.historyEnabled
-        ? `Historico ativo (${args.historyStorageMode}).`
-        : 'Historico desativado.',
+        ? args.historyStorageMode === 'encrypted'
+          ? 'Histórico local ativo com proteção criptografada.'
+          : 'Histórico local ativo sem criptografia. Considere ativar proteção criptografada.'
+        : 'Histórico local desativado.',
   };
   const phraseItem: HealthCheckItem = {
     id: 'phrases',
     status: args.phraseBoostCount > 0 ? 'ok' : 'warn',
     message:
       args.phraseBoostCount > 0
-        ? `${args.phraseBoostCount} phrase boosts ativos.`
-        : 'Nenhum phrase boost ativo.',
+        ? `${args.phraseBoostCount} termos de reforço ativos para melhorar o reconhecimento.`
+        : 'Nenhum termo de reforço configurado para reconhecimento.',
   };
   const injectionItem: HealthCheckItem = args.recentInjection
     ? {
         id: 'injection',
         status: args.recentInjection.pasted ? 'ok' : 'warn',
         message: args.recentInjection.pasted
-          ? `Ultimo paste OK via ${args.recentInjection.method ?? 'desconhecido'}.`
-          : `Ultimo paste falhou (${args.recentInjection.skippedReason ?? 'sem motivo'}).`,
+          ? `Última inserção de texto concluída com sucesso via ${args.recentInjection.method ?? 'método desconhecido'}.`
+          : `A última inserção automática falhou (${args.recentInjection.skippedReason ?? 'motivo não informado'}).`,
       }
     : {
         id: 'injection',
         status: 'warn',
-        message: 'Sem dados recentes de injection.',
+        message: 'Ainda não há dados recentes sobre inserção automática de texto.',
       };
   if (args.perfSummary && args.perfSummary.sampleCount > 0) {
-    injectionItem.message += ` ${args.perfSummary.sampleCount} amostras de performance registradas.`;
+    injectionItem.message += ` ${args.perfSummary.sampleCount} amostras de desempenho registradas.`;
   }
 
   const securityStatus: HealthStatus =
@@ -191,16 +202,16 @@ export async function getHealthCheckReport(args: {
         ? 'warn'
         : 'ok';
   const securityMessages = [
-    args.runtimeSecurity.cspEnabled ? 'CSP runtime ativa.' : 'CSP runtime desativada.',
+    args.runtimeSecurity.cspEnabled ? 'CSP em tempo de execução ativa.' : 'CSP em tempo de execução desativada.',
     args.runtimeSecurity.permissionsPolicy === 'default-deny'
-      ? 'Permissoes em default deny.'
-      : 'Permissoes fora do modo estrito.',
+      ? 'Permissões no modo default deny.'
+      : 'Permissões fora do modo estrito.',
     args.historyStorageMode === 'encrypted'
-      ? 'Historico criptografado.'
-      : 'Historico em plain text.',
+      ? 'Histórico protegido com criptografia.'
+      : 'Histórico armazenado em texto simples.',
     args.isEncryptionAvailable
-      ? 'safeStorage disponivel.'
-      : 'safeStorage indisponivel neste ambiente.',
+      ? 'safeStorage disponível.'
+      : 'safeStorage indisponível neste ambiente.',
   ];
   const securityItem: HealthCheckItem = {
     id: 'security',

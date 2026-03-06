@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
+import type { HistoryStorageMode } from '@/electron';
 import type { LatencyProfile } from '@/lib/latency';
 import { memo } from 'react';
 import type { AudioDevice, LanguageMode, ToneMode } from './types';
@@ -11,6 +12,7 @@ type SettingsTabProps = {
   hasDesktopApi: boolean;
   historyEnabled: boolean;
   historyRetentionDays: number;
+  historyStorageMode: HistoryStorageMode;
   languageMode: LanguageMode;
   latencyProfile: LatencyProfile;
   micDeviceId: string;
@@ -23,9 +25,13 @@ type SettingsTabProps = {
   onSetFormatCommandsEnabled: (value: boolean) => void;
   onSetHistoryEnabled: (value: boolean) => void;
   onSetHistoryRetentionDays: (value: number) => void;
+  onSetHistoryStorageMode: (value: HistoryStorageMode) => void;
   onSetInputGain: (value: number) => void;
   onSetLanguageMode: (value: LanguageMode) => void;
   onSetMicDeviceId: (value: string) => void;
+  onSetPrivacyMode: (value: boolean) => void;
+  privacyMode: boolean;
+  settingsSaving: boolean;
   toneMode: ToneMode;
 };
 
@@ -35,6 +41,7 @@ const SettingsTab = memo(function SettingsTab({
   hasDesktopApi,
   historyEnabled,
   historyRetentionDays,
+  historyStorageMode,
   languageMode,
   latencyProfile,
   micDeviceId,
@@ -47,160 +54,195 @@ const SettingsTab = memo(function SettingsTab({
   onSetFormatCommandsEnabled,
   onSetHistoryEnabled,
   onSetHistoryRetentionDays,
+  onSetHistoryStorageMode,
   onSetInputGain,
   onSetLanguageMode,
   onSetMicDeviceId,
+  onSetPrivacyMode,
+  privacyMode,
+  settingsSaving,
   toneMode,
 }: SettingsTabProps) {
   return (
-    <Card className="border-border bg-card shadow-sm overflow-hidden mb-6">
+    <Card className="mb-6 overflow-hidden border-border bg-card shadow-sm">
       <CardHeader className="border-b border-border/40 bg-muted/20 pb-5">
         <CardTitle className="text-lg font-medium text-foreground">
-          Configurações de Áudio e IA
+          Preferências do aplicativo
         </CardTitle>
         <CardDescription>
-          Parâmetros avançados de captura, transcrição e estilo.
+          Organize o ditado por blocos: captura, escrita, privacidade e reconhecimento.
         </CardDescription>
       </CardHeader>
-      <CardContent className="grid gap-8 sm:grid-cols-2 pt-6">
-        <div className="space-y-3">
-          <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
-            Interface de Áudio
-          </label>
-          <select
-            className="h-11 w-full rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-all hover:bg-muted cursor-pointer appearance-none"
-            value={micDeviceId}
-            onChange={(e) => onSetMicDeviceId(e.target.value)}
-            disabled={!hasDesktopApi}
-          >
-            <option value="" className="bg-background text-foreground">
-              Sistema (Padrão)
-            </option>
-            {micDevices.map((d) => (
-              <option key={d.deviceId} value={d.deviceId} className="bg-background text-foreground">
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-              Ganho Analógico
+      <CardContent className="space-y-8 pt-6">
+        <section className="grid gap-4 rounded-[24px] border border-border/40 bg-muted/10 p-5 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
+              Captura e entrada
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Defina como o app escuta sua voz antes da transcrição.
+            </p>
+          </div>
+          <div className="space-y-3">
+            <label className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              Microfone preferido
             </label>
-            <span className="text-xs font-mono font-medium text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded-md">
-              {micInputGain.toFixed(2)}x
-            </span>
+            <select
+              className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground transition-all hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
+              value={micDeviceId}
+              onChange={(e) => onSetMicDeviceId(e.target.value)}
+              disabled={!hasDesktopApi || settingsSaving}
+            >
+              <option value="" className="bg-background text-foreground">
+                Padrão do sistema
+              </option>
+              {micDevices.map((d) => (
+                <option
+                  key={d.deviceId}
+                  value={d.deviceId}
+                  className="bg-background text-foreground"
+                >
+                  {d.label}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="h-11 flex items-center bg-background rounded-xl px-4 border border-border/50">
-            <input
-              type="range"
-              min={0.5}
-              max={2}
-              step={0.05}
-              value={micInputGain}
-              onChange={(e) => onSetInputGain(Number(e.target.value))}
-              disabled={!hasDesktopApi}
-              className="w-full accent-blue-500 h-1.5 bg-muted rounded-lg appearance-none cursor-pointer outline-none"
-            />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+                Ganho de entrada
+              </label>
+              <span className="rounded-md bg-blue-500/10 px-2 py-0.5 font-mono text-xs font-medium text-blue-500">
+                {micInputGain.toFixed(2)}x
+              </span>
+            </div>
+            <div className="flex h-11 items-center rounded-xl border border-border/50 bg-background px-4">
+              <input
+                type="range"
+                min={0.5}
+                max={2}
+                step={0.05}
+                value={micInputGain}
+                onChange={(e) => onSetInputGain(Number(e.target.value))}
+                disabled={!hasDesktopApi || settingsSaving}
+                className="h-1.5 w-full cursor-pointer appearance-none rounded-lg bg-muted accent-blue-500 outline-none"
+              />
+            </div>
           </div>
-        </div>
+        </section>
 
-        <div className="space-y-3">
-          <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-            Perfil de Latência
-          </label>
-          <select
-            className="h-11 w-full rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-all hover:bg-muted cursor-pointer appearance-none"
-            value={latencyProfile}
-            onChange={(e) => onChangeLatencyProfile(e.target.value as LatencyProfile)}
-            disabled={!hasDesktopApi}
-          >
-            <option value="fast" className="bg-background text-foreground">
-              Fast (Baixa retenção)
-            </option>
-            <option value="balanced" className="bg-background text-foreground">
-              Balanced
-            </option>
-            <option value="accurate" className="bg-background text-foreground">
-              Accurate (Maior buffer)
-            </option>
-          </select>
-        </div>
-
-        <div className="space-y-3">
-          <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-            Estilo de Escrita
-          </label>
-          <select
-            className="h-11 w-full rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-all hover:bg-muted cursor-pointer appearance-none"
-            value={toneMode}
-            onChange={(e) => onChangeToneMode(e.target.value as ToneMode)}
-            disabled={!hasDesktopApi}
-          >
-            <option value="formal" className="bg-background text-foreground">
-              Formal
-            </option>
-            <option value="casual" className="bg-background text-foreground">
-              Casual (Padrão)
-            </option>
-            <option value="very-casual" className="bg-background text-foreground">
-              Very Casual
-            </option>
-          </select>
-        </div>
-
-        <div className="space-y-3">
-          <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-            Idioma Principal
-          </label>
-          <select
-            className="h-11 w-full rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring transition-all hover:bg-muted cursor-pointer appearance-none"
-            value={languageMode}
-            onChange={(e) => onSetLanguageMode(e.target.value as LanguageMode)}
-            disabled={!hasDesktopApi}
-          >
-            <option value="pt-BR" className="bg-background text-foreground">
-              Português (Brasil)
-            </option>
-            <option value="en-US" className="bg-background text-foreground">
-              Inglês (US)
-            </option>
-            <option value="dual" className="bg-background text-foreground">
-              Auto-detect (Dual Pass)
-            </option>
-          </select>
-        </div>
-
-        <div className="space-y-3">
-          <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-            Engine STT
-          </label>
-          <div className="h-11 flex items-center w-full rounded-xl border border-border/40 bg-muted/20 px-4 text-sm text-muted-foreground">
-            Azure Cognitive Services
+        <section className="grid gap-4 rounded-[24px] border border-border/40 bg-muted/10 p-5 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
+              Texto e idioma
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Ajuste a resposta do ditado para combinar com o seu contexto de uso.
+            </p>
           </div>
-        </div>
-
-        <div className="sm:col-span-2 grid gap-4 sm:grid-cols-2 pt-2">
-          <div className="flex items-center justify-between rounded-2xl border border-border/40 bg-muted/20 px-5 py-4 hover:bg-muted/60 transition-colors">
+          <div className="space-y-3">
+            <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              Resposta da captura
+            </label>
+            <select
+              className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground transition-all hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
+              value={latencyProfile}
+              onChange={(e) => onChangeLatencyProfile(e.target.value as LatencyProfile)}
+              disabled={!hasDesktopApi || settingsSaving}
+            >
+              <option value="fast" className="bg-background text-foreground">
+                Rápida
+              </option>
+              <option value="balanced" className="bg-background text-foreground">
+                Equilibrada
+              </option>
+              <option value="accurate" className="bg-background text-foreground">
+                Precisa
+              </option>
+            </select>
+          </div>
+          <div className="space-y-3">
+            <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              Estilo de escrita
+            </label>
+            <select
+              className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground transition-all hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
+              value={toneMode}
+              onChange={(e) => onChangeToneMode(e.target.value as ToneMode)}
+              disabled={!hasDesktopApi || settingsSaving}
+            >
+              <option value="formal" className="bg-background text-foreground">
+                Formal
+              </option>
+              <option value="casual" className="bg-background text-foreground">
+                Natural
+              </option>
+              <option value="very-casual" className="bg-background text-foreground">
+                Bem coloquial
+              </option>
+            </select>
+          </div>
+          <div className="space-y-3">
+            <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              Idioma principal
+            </label>
+            <select
+              className="h-11 w-full cursor-pointer appearance-none rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground transition-all hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
+              value={languageMode}
+              onChange={(e) => onSetLanguageMode(e.target.value as LanguageMode)}
+              disabled={!hasDesktopApi || settingsSaving}
+            >
+              <option value="pt-BR" className="bg-background text-foreground">
+                Português (Brasil)
+              </option>
+              <option value="en-US" className="bg-background text-foreground">
+                Inglês (US)
+              </option>
+              <option value="dual" className="bg-background text-foreground">
+                Detecção automática
+              </option>
+            </select>
+          </div>
+          <div className="space-y-3">
+            <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+              Serviço de transcrição
+            </label>
+            <div className="flex h-11 w-full items-center rounded-xl border border-border/40 bg-background px-4 text-sm text-muted-foreground">
+              Azure Speech-to-Text
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl border border-border/40 bg-background px-5 py-4 transition-colors hover:bg-muted/60">
             <div>
-              <span className="block text-sm font-medium text-foreground">Comandos Estruturais</span>
-              <span className="block text-xs text-muted-foreground mt-0.5">
-                Nova linha, ponto final, etc.
+              <span className="block text-sm font-medium text-foreground">
+                Comandos estruturais
+              </span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Reconhece instruções como nova linha e ponto final.
               </span>
             </div>
             <Switch
               checked={formatCommandsEnabled}
               onCheckedChange={onSetFormatCommandsEnabled}
-              disabled={!hasDesktopApi}
+              disabled={!hasDesktopApi || settingsSaving}
             />
           </div>
+        </section>
 
-          <div className="flex items-center justify-between rounded-2xl border border-border/40 bg-muted/20 px-5 py-4 hover:bg-muted/60 transition-colors">
+        <section className="grid gap-4 rounded-[24px] border border-border/40 bg-muted/10 p-5 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <div className="text-[11px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
+              Privacidade e retenção
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Decida o que fica salvo neste dispositivo e como isso deve ser protegido.
+            </p>
+          </div>
+          <div className="flex items-center justify-between rounded-2xl border border-border/40 bg-background px-5 py-4 transition-colors hover:bg-muted/60">
             <div>
-              <span className="block text-sm font-medium text-foreground">Histórico de Sessão</span>
-              <div className="flex items-center gap-2 mt-1">
+              <span className="block text-sm font-medium text-foreground">
+                Salvar histórico local
+              </span>
+              <div className="mt-1 flex items-center gap-2">
                 <span className="block text-xs text-muted-foreground">Reter por</span>
                 <input
                   type="number"
@@ -208,8 +250,8 @@ const SettingsTab = memo(function SettingsTab({
                   max={365}
                   value={historyRetentionDays}
                   onChange={(e) => onSetHistoryRetentionDays(Number(e.target.value))}
-                  disabled={!hasDesktopApi || !historyEnabled}
-                  className="w-12 h-6 rounded bg-background border border-border text-center text-xs text-foreground focus:outline-none focus:border-ring disabled:opacity-50"
+                  disabled={!hasDesktopApi || !historyEnabled || settingsSaving}
+                  className="h-6 w-12 rounded border border-border bg-background text-center text-xs text-foreground focus:border-ring focus:outline-none disabled:opacity-50"
                 />
                 <span className="block text-xs text-muted-foreground">dias</span>
               </div>
@@ -217,34 +259,72 @@ const SettingsTab = memo(function SettingsTab({
             <Switch
               checked={historyEnabled}
               onCheckedChange={onSetHistoryEnabled}
-              disabled={!hasDesktopApi}
+              disabled={!hasDesktopApi || settingsSaving}
             />
           </div>
-        </div>
+          <div className="flex items-center justify-between rounded-2xl border border-border/40 bg-background px-5 py-4 transition-colors hover:bg-muted/60">
+            <div>
+              <span className="block text-sm font-medium text-foreground">Modo privado</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Desativa o salvamento local das transcrições.
+              </span>
+            </div>
+            <Switch
+              checked={privacyMode}
+              onCheckedChange={onSetPrivacyMode}
+              disabled={!hasDesktopApi || settingsSaving}
+            />
+          </div>
+          <div className="rounded-2xl border border-border/40 bg-background px-5 py-4 transition-colors hover:bg-muted/60 sm:col-span-2">
+            <label className="block text-sm font-medium text-foreground">
+              Proteção do histórico
+            </label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Escolha como o histórico local será armazenado neste dispositivo.
+            </p>
+            <select
+              className="mt-3 h-11 w-full cursor-pointer appearance-none rounded-xl border border-border/50 bg-background px-4 text-sm text-foreground transition-all hover:bg-muted focus:outline-none focus:ring-1 focus:ring-ring"
+              value={historyStorageMode}
+              onChange={(e) => onSetHistoryStorageMode(e.target.value as HistoryStorageMode)}
+              disabled={!hasDesktopApi || settingsSaving}
+            >
+              <option value="encrypted" className="bg-background text-foreground">
+                Criptografado
+              </option>
+              <option value="plain" className="bg-background text-foreground">
+                Texto simples
+              </option>
+            </select>
+          </div>
+        </section>
 
-        <div className="sm:col-span-2 space-y-3 pt-4 border-t border-border/50 mt-2">
-          <div className="flex items-end justify-between gap-3">
+        <section className="space-y-3 rounded-[24px] border border-border/40 bg-muted/10 p-5">
+          <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="space-y-1">
-              <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-                Phrase List (Azure Config)
+              <label className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+                Lista de contexto do Azure
               </label>
               <div className="text-xs text-muted-foreground">
-                Define o contexto semântico passado na inicialização da Stream Azure.
+                Adicione nomes, siglas e termos importantes para melhorar o reconhecimento.
               </div>
             </div>
-            <Button className="h-10 px-6 rounded-xl" onClick={onSaveComprehensionSettings} disabled={!hasDesktopApi}>
-              Salvar Modificações
+            <Button
+              className="h-10 rounded-xl px-6"
+              onClick={onSaveComprehensionSettings}
+              disabled={!hasDesktopApi || settingsSaving}
+            >
+              {settingsSaving ? 'Salvando...' : 'Salvar preferências'}
             </Button>
           </div>
           <textarea
-            className="min-h-[120px] w-full resize-y rounded-xl border border-border/50 bg-background p-4 text-sm text-foreground font-mono leading-relaxed placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring custom-scrollbar"
-            placeholder={'Exemplo:\nWispr\nReact Native\nDeploy Azure'}
+            className="custom-scrollbar min-h-[120px] w-full resize-y rounded-xl border border-border/50 bg-background p-4 font-mono text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring"
+            placeholder={'Exemplo:\nWhatsApp\nSupabase\nReunião de produto'}
             value={extraPhrasesText}
             onChange={(e) => onSetExtraPhrasesText(e.target.value)}
-            disabled={!hasDesktopApi}
+            disabled={!hasDesktopApi || settingsSaving}
             spellCheck={false}
           />
-        </div>
+        </section>
       </CardContent>
     </Card>
   );
