@@ -77,7 +77,6 @@
     "globals": "^15.15.0",
     "jsdom": "^20.0.3",
     "knip": "^5.63.1",
-    "lovable-tagger": "^1.1.13",
     "madge": "^8.0.0",
     "png-to-ico": "^3.0.1",
     "postcss": "^8.5.6",
