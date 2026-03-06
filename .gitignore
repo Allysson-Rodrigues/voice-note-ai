@@ -19,6 +19,7 @@ release
 .env
 .env.*
 !.env.example
+playground_*.html
 WisprHUD.jsx
 HudPillDemo.jsx
 Wispr flow like.jsx
