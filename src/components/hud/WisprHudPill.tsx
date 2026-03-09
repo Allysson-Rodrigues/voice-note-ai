@@ -237,7 +237,10 @@ export default function WisprHudPill() {
             </div>
 
             <div className="pill-content-wrapper">
-              <span className="hud-label-compact">{resolveLabel(hudState)}</span>
+              <div className="hud-copy">
+                <span className="hud-kicker">Voice Note</span>
+                <span className="hud-label-compact">{resolveLabel(hudState)}</span>
+              </div>
               <Visualizer hudState={hudState} levelRef={targetLevelRef} />
             </div>
           </div>

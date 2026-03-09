@@ -2,6 +2,10 @@
 
 Windows-first desktop dictation app built with Electron, React, TypeScript, and Azure Speech-to-Text.
 
+## Status
+
+Active.
+
 It captures microphone audio while the global hotkey is held, streams audio to Azure STT, and inserts the final transcript into the active app. The project also includes a transparent HUD, configurable settings, smart post-processing, and optional local history.
 
 ## Scope
@@ -60,7 +64,14 @@ Most relevant variables:
 - `VOICE_HUD`
 - `VOICE_MAX_SESSION_SECONDS`
 
-For packaged Windows builds, Azure variables should be configured in the OS environment.
+For local development, `.env.local` remains supported.
+
+For packaged Windows builds, Azure credentials can be configured either:
+
+- in the app settings and stored with Electron `safeStorage`
+- in OS environment variables as a fallback
+
+Hotkey and session limits can also be changed at runtime from the settings screen. The `VOICE_*` values act as defaults for first boot.
 
 ## Validation
 

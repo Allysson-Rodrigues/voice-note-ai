@@ -12,6 +12,10 @@ const CLIPBOARD_RESTORE_MAX_MS = 200;
 const CLIPBOARD_TX_TIMEOUT_MS = 3000;
 const APP_KEY_CACHE_TTL_MS = 15000;
 const APP_KEY_CACHE_MAX_ENTRIES = 128;
+const RESOLVE_WINDOW_RETRIES = 2;
+const WINDOW_PASTE_RETRIES = 2;
+const KEYBOARD_PASTE_RETRIES = 2;
+const RETRY_SLEEP_MS = 60;
 
 type InjectMetrics = {
   resolveWindowMs: number;
@@ -24,6 +28,8 @@ type InjectResult = {
   restored: boolean;
   skippedReason?: 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
   metrics?: InjectMetrics;
+  method?: PasteAttempt | null;
+  appKey?: string | null;
 };
 
 type ClipboardSnapshot = {
@@ -45,6 +51,38 @@ type InjectionMethodStats = Record<PasteAttempt, { success: number; failure: num
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function retryBooleanOperation(
+  operation: () => Promise<boolean>,
+  attempts: number,
+  delayMs: number,
+) {
+  let lastResult = false;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    lastResult = await operation();
+    if (lastResult) return true;
+    if (attempt < attempts) await sleep(delayMs);
+  }
+  return false;
+}
+
+async function retryPromiseOperation(
+  operation: () => Promise<void>,
+  attempts: number,
+  delayMs: number,
+) {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await operation();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(delayMs);
+    }
+  }
+  throw lastError;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -231,17 +269,27 @@ async function resolveTargetWindowInfo(
     '[Console]::Out.Write((@{ handle = "$current"; ready = [bool]$ready; app = $app } | ConvertTo-Json -Compress))',
   ].join('; ');
 
-  try {
-    const raw = await runPowerShell(script, 1500);
-    const parsed = JSON.parse(raw) as { handle?: string; ready?: boolean; app?: string };
-    return {
-      targetReady: parsed.ready !== false,
-      currentHandle: parsed.handle && parsed.handle !== '0' ? parsed.handle : null,
-      appKey: parsed.app ? parsed.app.toLowerCase() : null,
-    };
-  } catch {
-    return { targetReady: false, currentHandle: null, appKey: null };
+  for (let attempt = 1; attempt <= RESOLVE_WINDOW_RETRIES; attempt += 1) {
+    try {
+      const raw = await runPowerShell(script, 1500);
+      const parsed = JSON.parse(raw) as { handle?: string; ready?: boolean; app?: string };
+      const result = {
+        targetReady: parsed.ready !== false,
+        currentHandle: parsed.handle && parsed.handle !== '0' ? parsed.handle : null,
+        appKey: parsed.app ? parsed.app.toLowerCase() : null,
+      };
+      if (result.targetReady || attempt >= RESOLVE_WINDOW_RETRIES) {
+        return result;
+      }
+    } catch {
+      if (attempt >= RESOLVE_WINDOW_RETRIES) {
+        return { targetReady: false, currentHandle: null, appKey: null };
+      }
+    }
+    await sleep(RETRY_SLEEP_MS);
   }
+
+  return { targetReady: false, currentHandle: null, appKey: null };
 }
 
 async function focusWindowByHandle(handle: string) {
@@ -273,7 +321,13 @@ async function windowsSendCtrlV() {
     '$wshell = New-Object -ComObject WScript.Shell',
     "Start-Sleep -Milliseconds 40; $wshell.SendKeys('^v')",
   ].join('; ');
-  await runPowerShell(script, 1000);
+  await retryPromiseOperation(
+    async () => {
+      await runPowerShell(script, 1000);
+    },
+    KEYBOARD_PASTE_RETRIES,
+    RETRY_SLEEP_MS,
+  );
 }
 
 async function windowsSendShiftInsert() {
@@ -282,7 +336,13 @@ async function windowsSendShiftInsert() {
     '$wshell = New-Object -ComObject WScript.Shell',
     "Start-Sleep -Milliseconds 40; $wshell.SendKeys('+{INSERT}')",
   ].join('; ');
-  await runPowerShell(script, 1000);
+  await retryPromiseOperation(
+    async () => {
+      await runPowerShell(script, 1000);
+    },
+    KEYBOARD_PASTE_RETRIES,
+    RETRY_SLEEP_MS,
+  );
 }
 
 async function windowsPasteToHandle(handle: string) {
@@ -302,12 +362,18 @@ async function windowsPasteToHandle(handle: string) {
     '[Console]::Out.Write((@{ ok = $true } | ConvertTo-Json -Compress))',
   ].join('; ');
 
-  try {
-    await runPowerShell(script, 1000);
-    return true;
-  } catch {
-    return false;
-  }
+  return await retryBooleanOperation(
+    async () => {
+      try {
+        await runPowerShell(script, 1000);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    WINDOW_PASTE_RETRIES,
+    RETRY_SLEEP_MS,
+  );
 }
 
 // ── Clipboard helpers ──────────────────────────────────────────────────
@@ -480,6 +546,7 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
   async function injectText(
     text: string,
     targetWindowHandle: string | null,
+    request?: { forceCopyOnly?: boolean },
   ): Promise<InjectResult> {
     const normalized = windowsLineEndings(text);
 
@@ -492,11 +559,13 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
           const previous = snapshotClipboard();
           clipboard.writeText(normalized);
 
-          if (!options.canAutoPaste()) {
+          if (request?.forceCopyOnly || !options.canAutoPaste()) {
             return {
               pasted: false,
               restored: false,
               metrics: { resolveWindowMs, pasteAttemptMs, clipboardRestoreMs },
+              method: null,
+              appKey: null,
             };
           }
 
@@ -582,6 +651,8 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
               restored: false,
               skippedReason,
               metrics: { resolveWindowMs, pasteAttemptMs, clipboardRestoreMs },
+              method: usedAttempt,
+              appKey,
             };
           }
 
@@ -623,6 +694,8 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
             pasted,
             restored,
             metrics: { resolveWindowMs, pasteAttemptMs, clipboardRestoreMs },
+            method: usedAttempt,
+            appKey,
           };
         })(),
         CLIPBOARD_TX_TIMEOUT_MS,
@@ -634,6 +707,8 @@ export function createTextInjectionService(options: TextInjectionServiceOptions)
           restored: false,
           skippedReason: 'TIMEOUT' as const,
           metrics: { resolveWindowMs: 0, pasteAttemptMs: 0, clipboardRestoreMs: 0 },
+          method: null,
+          appKey: null,
         };
       }),
     );

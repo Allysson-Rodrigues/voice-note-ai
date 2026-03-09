@@ -1,7 +1,7 @@
 {
   "name": "vox-type",
   "private": true,
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Universal push-to-talk dictation app for Windows with Azure Speech-to-Text.",
   "author": "Allysson",
   "main": "electron-dist/main.js",
@@ -100,6 +100,7 @@
       "dist/**/*",
       "electron-dist/**/*",
       "electron/preload.cjs",
+      "electron/hud-preload.cjs",
       "public/**/*",
       "package.json"
     ],

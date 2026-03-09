@@ -23,4 +23,43 @@ describe('electron transcript postprocess', () => {
     });
     expect(output).toBe('Antigravity, Workspace');
   });
+
+  it('structures bullet list intent and preserves protected terms', () => {
+    const output = applyTranscriptPostprocess('googel revisar anti gravity', {
+      toneMode: 'casual',
+      canonicalTerms: canonicalTermsFixture,
+      formatCommandsEnabled: true,
+      intent: 'bullet-list',
+      protectedTerms: ['Google'],
+    });
+
+    expect(output).toBe('• Google revisar Antigravity');
+  });
+
+  it('formats email intent with greeting', () => {
+    const output = applyTranscriptPostprocess(
+      'assunto atualização do projeto ponto final enviar hoje',
+      {
+        toneMode: 'formal',
+        canonicalTerms: canonicalTermsFixture,
+        formatCommandsEnabled: true,
+        intent: 'email',
+        language: 'pt-BR',
+      },
+    );
+
+    expect(output.startsWith('Olá,')).toBe(true);
+  });
+
+  it('merges stray period caused by a short breathing pause', () => {
+    const output = applyTranscriptPostprocess('eu preciso respirar. e depois continuar', {
+      toneMode: 'casual',
+      canonicalTerms: canonicalTermsFixture,
+      formatCommandsEnabled: true,
+      intent: 'free-text',
+      language: 'pt-BR',
+    });
+
+    expect(output).toBe('Eu preciso respirar e depois continuar');
+  });
 });

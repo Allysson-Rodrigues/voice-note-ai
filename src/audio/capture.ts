@@ -1,6 +1,19 @@
 const TARGET_SAMPLE_RATE = 16000;
 const FRAME_SAMPLES = 320;
 
+export type MicrophonePermissionState = 'granted' | 'prompt' | 'denied' | 'unsupported';
+export type CaptureStartErrorCode =
+  | 'permission-denied'
+  | 'device-missing'
+  | 'device-busy'
+  | 'constraints-invalid'
+  | 'unsupported'
+  | 'unknown';
+
+type CaptureStartErrorOptions = {
+  cause?: unknown;
+};
+
 type CaptureSession = {
   sessionId: string;
   stream: MediaStream;
@@ -14,6 +27,22 @@ export type CaptureIssueEvent = {
   code: 'device-missing-fallback' | 'device-disconnected' | 'devicechange';
   message: string;
 };
+
+export class CaptureStartError extends Error {
+  code: CaptureStartErrorCode;
+  cause?: unknown;
+
+  constructor(
+    code: CaptureStartErrorCode,
+    message: string,
+    options: CaptureStartErrorOptions = {},
+  ) {
+    super(message);
+    this.name = 'CaptureStartError';
+    this.code = code;
+    this.cause = options.cause;
+  }
+}
 
 let active: CaptureSession | null = null;
 let sharedAudioContext: AudioContext | null = null;
@@ -35,6 +64,89 @@ export function onCaptureIssue(listener: (event: CaptureIssueEvent) => void) {
 
 function canUseAudioContext() {
   return typeof AudioContext !== 'undefined';
+}
+
+function getNavigatorPermissions() {
+  if (typeof navigator === 'undefined') return null;
+  const permissions =
+    (navigator as Navigator & { permissions?: Navigator['permissions'] }).permissions ?? null;
+  return permissions;
+}
+
+function getDomExceptionName(error: unknown) {
+  if (!error || typeof error !== 'object') return '';
+  return 'name' in error && typeof error.name === 'string' ? error.name : '';
+}
+
+export function normalizeCaptureStartError(error: unknown) {
+  if (error instanceof CaptureStartError) return error;
+
+  const name = getDomExceptionName(error);
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') {
+    return new CaptureStartError(
+      'permission-denied',
+      'Permissão de microfone negada. Libere o acesso ao microfone para este app nas configurações do Windows e reinicie o Voice Note AI.',
+      { cause: error },
+    );
+  }
+
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return new CaptureStartError(
+      'device-missing',
+      'Nenhum microfone disponível foi encontrado. Conecte um dispositivo de áudio e tente novamente.',
+      { cause: error },
+    );
+  }
+
+  if (name === 'NotReadableError' || name === 'TrackStartError' || name === 'AbortError') {
+    return new CaptureStartError(
+      'device-busy',
+      'Não foi possível acessar o microfone. Ele pode estar em uso por outro aplicativo ou bloqueado pelo sistema.',
+      { cause: error },
+    );
+  }
+
+  if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+    return new CaptureStartError(
+      'constraints-invalid',
+      'O microfone selecionado não atende aos requisitos de captura. Escolha outro dispositivo e tente novamente.',
+      { cause: error },
+    );
+  }
+
+  if (
+    error instanceof Error &&
+    error.message === 'AudioContext is not available in this environment.'
+  ) {
+    return new CaptureStartError('unsupported', 'Captura de áudio indisponível neste ambiente.', {
+      cause: error,
+    });
+  }
+
+  return new CaptureStartError(
+    'unknown',
+    error instanceof Error ? error.message : 'Falha ao acessar o microfone.',
+    { cause: error },
+  );
+}
+
+export async function getMicrophonePermissionState(): Promise<MicrophonePermissionState> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    return 'unsupported';
+  }
+
+  const permissions = getNavigatorPermissions();
+  if (!permissions?.query) return 'unsupported';
+
+  try {
+    const result = await permissions.query({ name: 'microphone' as PermissionName });
+    if (result.state === 'granted' || result.state === 'prompt' || result.state === 'denied') {
+      return result.state;
+    }
+    return 'unsupported';
+  } catch {
+    return 'unsupported';
+  }
 }
 
 function getOrCreateAudioContext() {
@@ -96,8 +208,8 @@ export async function primeMicrophone(deviceId?: string | null) {
       audio: buildAudioConstraints(deviceId),
     });
     for (const track of stream.getTracks()) track.stop();
-  } catch {
-    // ignore permission/device issues, this is best effort
+  } catch (error) {
+    throw normalizeCaptureStartError(error);
   }
 }
 
@@ -121,14 +233,19 @@ export async function startCapture(
       audio: buildAudioConstraints(deviceId),
     });
   } catch (error) {
-    if (!deviceId) throw error;
+    const normalized = normalizeCaptureStartError(error);
+    if (!deviceId || normalized.code !== 'constraints-invalid') throw normalized;
     emitCaptureIssue({
       code: 'device-missing-fallback',
       message: 'Microfone selecionado indisponível. Captura alternada para dispositivo padrão.',
     });
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: buildAudioConstraints(null),
-    });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: buildAudioConstraints(null),
+      });
+    } catch (fallbackError) {
+      throw normalizeCaptureStartError(fallbackError);
+    }
   }
 
   for (const track of stream.getAudioTracks()) {

@@ -1,4 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const loggerMocks = vi.hoisted(() => ({
+  logInfo: vi.fn(),
+  logWarn: vi.fn(),
+}));
+
+vi.mock('../logger.js', () => ({
+  logInfo: loggerMocks.logInfo,
+  logWarn: loggerMocks.logWarn,
+}));
 import {
   buildContentSecurityPolicy,
   hardenBrowserWindow,
@@ -8,6 +18,44 @@ import {
 } from './window-security.js';
 
 describe('window security', () => {
+  beforeEach(() => {
+    loggerMocks.logInfo.mockClear();
+    loggerMocks.logWarn.mockClear();
+  });
+
+  it('logs permission decision context', () => {
+    const setPermissionCheckHandler = vi.fn();
+    const setPermissionRequestHandler = vi.fn();
+    const fakeSession = {
+      webRequest: { onHeadersReceived: vi.fn() },
+      setPermissionCheckHandler,
+      setPermissionRequestHandler,
+    } as never;
+
+    installSessionSecurity(fakeSession, 'http://localhost:8080');
+
+    const permissionRequestHandler = setPermissionRequestHandler.mock.calls[0]?.[0];
+    const callback = vi.fn();
+
+    permissionRequestHandler?.(
+      { getURL: () => 'http://localhost:8080/index.html' },
+      'media',
+      callback,
+      { mediaTypes: ['audio'] },
+    );
+
+    expect(callback).toHaveBeenCalledWith(true);
+    expect(loggerMocks.logInfo).toHaveBeenCalledWith(
+      'permission request allowed',
+      expect.objectContaining({
+        permission: 'media',
+        origin: 'http://localhost:8080',
+        mediaTypes: ['audio'],
+        decision: 'allow',
+      }),
+    );
+  });
+
   it('builds csp with dev server allowances', () => {
     const csp = buildContentSecurityPolicy('http://localhost:8080');
     expect(csp).toContain("default-src 'self'");
@@ -22,6 +70,9 @@ describe('window security', () => {
 
   it('trusts file urls and localhost dev origins', () => {
     expect(isTrustedAppOrigin('file://')).toBe(true);
+    expect(isTrustedAppOrigin('file:///C:/Users/allys/dev/voice-note-ai/dist/index.html')).toBe(
+      true,
+    );
     expect(isTrustedAppOrigin('http://localhost:8080', 'http://localhost:8080')).toBe(true);
     expect(isTrustedAppOrigin('http://127.0.0.1:8080', 'http://localhost:8080')).toBe(true);
     expect(isTrustedAppOrigin('https://example.com', 'http://localhost:8080')).toBe(false);
@@ -56,7 +107,8 @@ describe('window security', () => {
 
   it('hardens browser window navigation', () => {
     const setWindowOpenHandler = vi.fn();
-    let willNavigateHandler: ((event: { preventDefault: () => void }, url: string) => void) | null = null;
+    let willNavigateHandler: ((event: { preventDefault: () => void }, url: string) => void) | null =
+      null;
     const preventDefault = vi.fn();
     const fakeWindow = {
       webContents: {
@@ -92,5 +144,56 @@ describe('window security', () => {
     expect(onHeadersReceived).toHaveBeenCalled();
     expect(setPermissionCheckHandler).toHaveBeenCalled();
     expect(setPermissionRequestHandler).toHaveBeenCalled();
+
+    const permissionCheckHandler = setPermissionCheckHandler.mock.calls[0]?.[0];
+    const permissionRequestHandler = setPermissionRequestHandler.mock.calls[0]?.[0];
+
+    expect(
+      permissionCheckHandler?.(
+        { getURL: () => 'https://example.com' },
+        'media',
+        'https://example.com',
+        { mediaType: 'audio' },
+      ),
+    ).toBe(false);
+
+    const callback = vi.fn();
+    permissionRequestHandler?.({ getURL: () => 'https://example.com' }, 'media', callback, {
+      mediaTypes: ['audio'],
+    });
+    expect(callback).toHaveBeenCalledWith(false);
+  });
+
+  it('allows microphone permission for packaged file windows', () => {
+    const setPermissionCheckHandler = vi.fn();
+    const setPermissionRequestHandler = vi.fn();
+    const fakeSession = {
+      webRequest: { onHeadersReceived: vi.fn() },
+      setPermissionCheckHandler,
+      setPermissionRequestHandler,
+    } as never;
+
+    installSessionSecurity(fakeSession);
+
+    const permissionCheckHandler = setPermissionCheckHandler.mock.calls[0]?.[0];
+    const permissionRequestHandler = setPermissionRequestHandler.mock.calls[0]?.[0];
+
+    expect(
+      permissionCheckHandler?.(
+        { getURL: () => 'file:///C:/Users/allys/dev/voice-note-ai/dist/index.html' },
+        'media',
+        '',
+        { mediaTypes: ['audio'] },
+      ),
+    ).toBe(true);
+
+    const callback = vi.fn();
+    permissionRequestHandler?.(
+      { getURL: () => 'file:///C:/Users/allys/dev/voice-note-ai/dist/index.html' },
+      'media',
+      callback,
+      { mediaTypes: ['audio'] },
+    );
+    expect(callback).toHaveBeenCalledWith(true);
   });
 });

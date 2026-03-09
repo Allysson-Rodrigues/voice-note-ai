@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import {
+  quarantineFile,
+  readTextFilePair,
+  unwrapStoreEnvelope,
+  wrapStoreEnvelope,
+  writeTextFileAtomic,
+} from './store-utils.js';
 
 export type HistorySkipReason = 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
 
@@ -23,6 +28,12 @@ export type HistoryEntry = {
     best?: number;
     mode?: string;
   };
+  intent?: string;
+  rewriteApplied?: boolean;
+  rewriteRisk?: 'low' | 'medium' | 'high';
+  appKey?: string;
+  injectionMethod?: string;
+  confidenceBucket?: 'high' | 'medium' | 'low';
   createdAt: string;
 };
 
@@ -50,6 +61,12 @@ export type HistoryAppendInput = {
     best?: number;
     mode?: string;
   };
+  intent?: string;
+  rewriteApplied?: boolean;
+  rewriteRisk?: 'low' | 'medium' | 'high';
+  appKey?: string;
+  injectionMethod?: string;
+  confidenceBucket?: 'high' | 'medium' | 'low';
   createdAt?: string;
 };
 
@@ -123,7 +140,7 @@ function parseHistoryEntry(raw: unknown): HistoryEntry | null {
     id,
     sessionId,
     text,
-    rawText: parseOptionalString(item.rawText, 20000),
+    rawText: undefined,
     pasted: item.pasted === true,
     skippedReason,
     retryCount: clampInt(item.retryCount, 0, 5, 0),
@@ -140,6 +157,20 @@ function parseHistoryEntry(raw: unknown): HistoryEntry | null {
             best: parseOptionalNumber((item.confidenceSummary as { best?: unknown }).best),
             mode: parseOptionalString((item.confidenceSummary as { mode?: unknown }).mode, 40),
           }
+        : undefined,
+    intent: parseOptionalString(item.intent, 40),
+    rewriteApplied: item.rewriteApplied === true,
+    rewriteRisk:
+      item.rewriteRisk === 'low' || item.rewriteRisk === 'medium' || item.rewriteRisk === 'high'
+        ? item.rewriteRisk
+        : undefined,
+    appKey: parseOptionalString(item.appKey, 80),
+    injectionMethod: parseOptionalString(item.injectionMethod, 40),
+    confidenceBucket:
+      item.confidenceBucket === 'high' ||
+      item.confidenceBucket === 'medium' ||
+      item.confidenceBucket === 'low'
+        ? item.confidenceBucket
         : undefined,
     createdAt,
   };
@@ -201,6 +232,22 @@ export class HistoryStore {
             mode: parseOptionalString(input.confidenceSummary.mode, 40),
           }
         : undefined,
+      intent: parseOptionalString(input.intent, 40),
+      rewriteApplied: input.rewriteApplied === true,
+      rewriteRisk:
+        input.rewriteRisk === 'low' ||
+        input.rewriteRisk === 'medium' ||
+        input.rewriteRisk === 'high'
+          ? input.rewriteRisk
+          : undefined,
+      appKey: parseOptionalString(input.appKey, 80),
+      injectionMethod: parseOptionalString(input.injectionMethod, 40),
+      confidenceBucket:
+        input.confidenceBucket === 'high' ||
+        input.confidenceBucket === 'medium' ||
+        input.confidenceBucket === 'low'
+          ? input.confidenceBucket
+          : undefined,
       createdAt:
         input.createdAt && input.createdAt.trim() ? input.createdAt : new Date().toISOString(),
     };
@@ -255,41 +302,33 @@ export class HistoryStore {
   }
 
   private async loadRaw(): Promise<HistoryEntry[]> {
-    try {
-      const content = await readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(this.decodeContent(content));
-      if (!Array.isArray(parsed)) {
-        await this.persist([]);
-        return [];
+    const pair = await readTextFilePair(this.filePath);
+    const primary = this.tryParse(pair.primary);
+    if (primary) {
+      if (primary.needsMigration) {
+        await this.persist(primary.entries);
       }
-
-      const entries: HistoryEntry[] = [];
-      const seen = new Set<string>();
-      for (const item of parsed) {
-        const entry = parseHistoryEntry(item);
-        if (!entry) continue;
-        if (seen.has(entry.id)) continue;
-        seen.add(entry.id);
-        entries.push(entry);
-      }
-
-      await this.persist(entries);
-      return entries;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return [];
-      if (error instanceof SyntaxError) {
-        await this.persist([]);
-        return [];
-      }
-      throw error;
+      return primary.entries;
     }
+
+    const backup = this.tryParse(pair.backup);
+    if (backup) {
+      await this.persist(backup.entries);
+      return backup.entries;
+    }
+
+    if (pair.primary != null) {
+      await quarantineFile(this.filePath, 'corrupt');
+    }
+
+    return [];
   }
 
   private async persist(entries: HistoryEntry[]): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    const serialized = JSON.stringify(sortNewestFirst(entries), null, 2);
-    await writeFile(this.filePath, this.encodeContent(serialized), 'utf8');
+    await writeTextFileAtomic(
+      this.filePath,
+      this.encodeContent(JSON.stringify(wrapStoreEnvelope(sortNewestFirst(entries)), null, 2)),
+    );
   }
 
   private decodeContent(content: string) {
@@ -307,6 +346,44 @@ export class HistoryStore {
       return this.codec.encryptString(content);
     } catch {
       return content;
+    }
+  }
+
+  private tryParse(content: string | null) {
+    if (content == null) return null;
+
+    try {
+      const parsed = JSON.parse(this.decodeContent(content));
+      const envelope = unwrapStoreEnvelope<unknown>(parsed);
+      if (!Array.isArray(envelope.data)) {
+        return {
+          entries: [] as HistoryEntry[],
+          needsMigration: envelope.version < 1,
+        };
+      }
+
+      const entries: HistoryEntry[] = [];
+      const seen = new Set<string>();
+      let needsMigration = envelope.version < 1;
+      for (const item of envelope.data) {
+        if (
+          item &&
+          typeof item === 'object' &&
+          typeof (item as { rawText?: unknown }).rawText === 'string' &&
+          (item as { rawText: string }).rawText.trim()
+        ) {
+          needsMigration = true;
+        }
+        const entry = parseHistoryEntry(item);
+        if (!entry) continue;
+        if (seen.has(entry.id)) continue;
+        seen.add(entry.id);
+        entries.push(entry);
+      }
+
+      return { entries, needsMigration };
+    } catch {
+      return null;
     }
   }
 }

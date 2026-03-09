@@ -1,5 +1,11 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import { normalizeHotkeyAccelerator } from './hotkey-config.js';
+import {
+  quarantineFile,
+  readTextFilePair,
+  unwrapStoreEnvelope,
+  wrapStoreEnvelope,
+  writeTextFileAtomic,
+} from './store-utils.js';
 
 export type ToneMode = 'formal' | 'casual' | 'very-casual';
 export type LanguageMode = 'pt-BR' | 'en-US' | 'dual';
@@ -7,6 +13,16 @@ export type SttProvider = 'azure';
 export type HistoryStorageMode = 'plain' | 'encrypted';
 export type PostprocessProfile = 'safe' | 'balanced' | 'aggressive';
 export type DualLanguageStrategy = 'parallel' | 'fallback-on-low-confidence';
+export type RewriteMode = 'off' | 'safe' | 'aggressive';
+export type LowConfidencePolicy = 'paste' | 'copy-only' | 'review';
+export type AppProfileDomain = 'general' | 'work' | 'support' | 'medical' | 'legal' | 'custom';
+export type TranscriptFormatStyle =
+  | 'message'
+  | 'paragraph'
+  | 'bullet-list'
+  | 'email'
+  | 'notes'
+  | 'technical-note';
 export type CanonicalTerm = {
   from: string;
   to: string;
@@ -21,10 +37,17 @@ export type AppProfile = {
   injectionMethod?: InjectionMethod;
   languageBias?: 'pt-BR' | 'en-US' | 'mixed';
   postprocessProfile?: PostprocessProfile;
+  domain?: AppProfileDomain;
+  extraPhrases?: string[];
+  formatStyle?: TranscriptFormatStyle;
+  rewriteEnabled?: boolean;
+  protectedTerms?: string[];
 };
 export type AppProfiles = Record<string, AppProfile>;
 
 export type AppSettings = {
+  hotkeyPrimary: string;
+  hotkeyFallback: string;
   autoPasteEnabled: boolean;
   toneMode: ToneMode;
   languageMode: LanguageMode;
@@ -41,6 +64,12 @@ export type AppSettings = {
   historyStorageMode: HistoryStorageMode;
   postprocessProfile: PostprocessProfile;
   dualLanguageStrategy: DualLanguageStrategy;
+  rewriteEnabled: boolean;
+  rewriteMode: RewriteMode;
+  intentDetectionEnabled: boolean;
+  protectedTerms: string[];
+  lowConfidencePolicy: LowConfidencePolicy;
+  adaptiveLearningEnabled: boolean;
   appProfiles: AppProfiles;
 };
 
@@ -52,6 +81,8 @@ export const DEFAULT_CANONICAL_TERMS: CanonicalTerm[] = [
 ];
 
 const DEFAULT_SETTINGS: AppSettings = {
+  hotkeyPrimary: 'CommandOrControl+Super',
+  hotkeyFallback: 'CommandOrControl+Super+Space',
   autoPasteEnabled: false,
   toneMode: 'casual',
   languageMode: 'pt-BR',
@@ -68,6 +99,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   historyStorageMode: 'plain',
   postprocessProfile: 'balanced',
   dualLanguageStrategy: 'fallback-on-low-confidence',
+  rewriteEnabled: true,
+  rewriteMode: 'safe',
+  intentDetectionEnabled: true,
+  protectedTerms: [],
+  lowConfidencePolicy: 'review',
+  adaptiveLearningEnabled: true,
   appProfiles: {},
 };
 
@@ -170,6 +207,15 @@ function parseSttProvider(value: unknown): SttProvider {
   return 'azure';
 }
 
+function parseHotkeyAccelerator(value: unknown, fallback: string) {
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  try {
+    return normalizeHotkeyAccelerator(value);
+  } catch {
+    return fallback;
+  }
+}
+
 function parseAppProfiles(raw: unknown): AppProfiles {
   if (!raw || typeof raw !== 'object') return {};
   const input = raw as Record<string, unknown>;
@@ -180,7 +226,9 @@ function parseAppProfiles(raw: unknown): AppProfiles {
     const item = value as Record<string, unknown>;
     const injectionMethod = parseInjectionMethod(item.injectionMethod);
     const languageBias =
-      item.languageBias === 'pt-BR' || item.languageBias === 'en-US' || item.languageBias === 'mixed'
+      item.languageBias === 'pt-BR' ||
+      item.languageBias === 'en-US' ||
+      item.languageBias === 'mixed'
         ? item.languageBias
         : undefined;
     const postprocessProfile =
@@ -189,7 +237,38 @@ function parseAppProfiles(raw: unknown): AppProfiles {
       item.postprocessProfile === 'aggressive'
         ? item.postprocessProfile
         : undefined;
-    out[appKey] = { injectionMethod: injectionMethod ?? undefined, languageBias, postprocessProfile };
+    const domain =
+      item.domain === 'general' ||
+      item.domain === 'work' ||
+      item.domain === 'support' ||
+      item.domain === 'medical' ||
+      item.domain === 'legal' ||
+      item.domain === 'custom'
+        ? item.domain
+        : undefined;
+    const formatStyle =
+      item.formatStyle === 'message' ||
+      item.formatStyle === 'paragraph' ||
+      item.formatStyle === 'bullet-list' ||
+      item.formatStyle === 'email' ||
+      item.formatStyle === 'notes' ||
+      item.formatStyle === 'technical-note'
+        ? item.formatStyle
+        : undefined;
+    const rewriteEnabled =
+      typeof item.rewriteEnabled === 'boolean' ? item.rewriteEnabled : undefined;
+    const extraPhrases = parsePhrases(item.extraPhrases);
+    const protectedTerms = parsePhrases(item.protectedTerms);
+    out[appKey] = {
+      injectionMethod: injectionMethod ?? undefined,
+      languageBias,
+      postprocessProfile,
+      domain,
+      extraPhrases,
+      formatStyle,
+      rewriteEnabled,
+      protectedTerms,
+    };
   }
   return out;
 }
@@ -216,8 +295,18 @@ function parseSettings(raw: unknown): AppSettings {
         : 'balanced';
   const dualLanguageStrategy: DualLanguageStrategy =
     obj.dualLanguageStrategy === 'parallel' ? 'parallel' : 'fallback-on-low-confidence';
+  const rewriteMode: RewriteMode =
+    obj.rewriteMode === 'off' ? 'off' : obj.rewriteMode === 'aggressive' ? 'aggressive' : 'safe';
+  const lowConfidencePolicy: LowConfidencePolicy =
+    obj.lowConfidencePolicy === 'paste'
+      ? 'paste'
+      : obj.lowConfidencePolicy === 'copy-only'
+        ? 'copy-only'
+        : 'review';
 
   return {
+    hotkeyPrimary: parseHotkeyAccelerator(obj.hotkeyPrimary, DEFAULT_SETTINGS.hotkeyPrimary),
+    hotkeyFallback: parseHotkeyAccelerator(obj.hotkeyFallback, DEFAULT_SETTINGS.hotkeyFallback),
     autoPasteEnabled: obj.autoPasteEnabled === true,
     toneMode,
     languageMode,
@@ -239,6 +328,12 @@ function parseSettings(raw: unknown): AppSettings {
     historyStorageMode,
     postprocessProfile,
     dualLanguageStrategy,
+    rewriteEnabled: obj.rewriteEnabled !== false,
+    rewriteMode,
+    intentDetectionEnabled: obj.intentDetectionEnabled !== false,
+    protectedTerms: parsePhrases(obj.protectedTerms),
+    lowConfidencePolicy,
+    adaptiveLearningEnabled: obj.adaptiveLearningEnabled !== false,
     appProfiles: parseAppProfiles(obj.appProfiles),
   };
 }
@@ -257,21 +352,29 @@ export class SettingsStore {
   }
 
   async load(): Promise<AppSettings> {
-    try {
-      const content = await readFile(this.filePath, 'utf8');
-      const parsed = parseSettings({ ...this.cached, ...JSON.parse(content) });
-      this.cached = parsed;
-      // Self-heal any malformed file on read.
-      await this.persist(parsed);
-      return parsed;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT' || error instanceof SyntaxError) {
-        await this.persist(this.cached);
-        return this.cached;
+    const pair = await readTextFilePair(this.filePath);
+    const primary = this.tryParse(pair.primary);
+    if (primary) {
+      this.cached = primary.settings;
+      if (primary.needsMigration) {
+        await this.persist(primary.settings);
       }
-      throw error;
+      return primary.settings;
     }
+
+    const backup = this.tryParse(pair.backup);
+    if (backup) {
+      this.cached = backup.settings;
+      await this.persist(backup.settings);
+      return backup.settings;
+    }
+
+    if (pair.primary != null) {
+      await quarantineFile(this.filePath, 'corrupt');
+    }
+
+    await this.persist(this.cached);
+    return this.cached;
   }
 
   async update(partial: Partial<AppSettings>): Promise<AppSettings> {
@@ -281,8 +384,33 @@ export class SettingsStore {
     return next;
   }
 
+  previewUpdate(partial: Partial<AppSettings>): AppSettings {
+    return parseSettings({ ...this.cached, ...partial });
+  }
+
+  async replace(next: AppSettings): Promise<AppSettings> {
+    const parsed = parseSettings(next);
+    this.cached = parsed;
+    await this.persist(parsed);
+    return parsed;
+  }
+
   private async persist(settings: AppSettings): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(settings, null, 2), 'utf8');
+    await writeTextFileAtomic(this.filePath, JSON.stringify(wrapStoreEnvelope(settings), null, 2));
+  }
+
+  private tryParse(content: string | null) {
+    if (content == null) return null;
+
+    try {
+      const raw = JSON.parse(content);
+      const envelope = unwrapStoreEnvelope<unknown>(raw);
+      return {
+        settings: parseSettings({ ...this.cached, ...((envelope.data ?? {}) as object) }),
+        needsMigration: envelope.version < 1,
+      };
+    } catch {
+      return null;
+    }
   }
 }

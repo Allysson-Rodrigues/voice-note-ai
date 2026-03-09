@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   onCaptureIssue,
-  primeMicrophone,
+  getMicrophonePermissionState,
+  normalizeCaptureStartError,
   setInputGain,
   startCapture,
   stopCapture,
@@ -119,6 +120,16 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
       };
     }
 
+    const permissionState = await getMicrophonePermissionState();
+    if (permissionState === 'denied') {
+      return {
+        id: 'microphone',
+        status: 'error',
+        message:
+          'Permissão de microfone negada. Libere o acesso nas configurações do Windows e reinicie o aplicativo.',
+      };
+    }
+
     const devices = await navigator.mediaDevices.enumerateDevices();
     const audioInputs = devices.filter((device) => device.kind === 'audioinput');
     if (audioInputs.length === 0) {
@@ -140,6 +151,15 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
       };
     }
 
+    if (permissionState === 'prompt') {
+      return {
+        id: 'microphone',
+        status: 'warn',
+        message:
+          'A permissão de microfone ainda não foi concedida. Inicie uma captura para autorizar o acesso.',
+      };
+    }
+
     return {
       id: 'microphone',
       status: 'ok',
@@ -147,34 +167,41 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
     };
   }, []);
 
-  const runHealthCheck = useCallback(async () => {
-    if (!hasDesktopApi) return;
+  const runHealthCheck = useCallback(
+    async (options?: { includeExternal?: boolean }) => {
+      if (!hasDesktopApi) return;
 
-    setHealthLoading(true);
-    try {
-      const [report, micItem] = await Promise.all([
-        window.voiceNoteAI.getHealthCheck(),
-        buildMicrophoneHealthItem(),
-      ]);
-      const backendItems = report.items.map((item) => ({
-        id: item.id,
-        status: item.status,
-        message: item.message,
-      })) as UiHealthItem[];
-      setHealthItems([...backendItems, micItem]);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setHealthItems([
-        {
-          id: 'network',
-          status: 'error',
-          message: `Falha ao executar o diagnóstico: ${message}`,
-        },
-      ]);
-    } finally {
-      setHealthLoading(false);
-    }
-  }, [buildMicrophoneHealthItem, hasDesktopApi]);
+      setHealthLoading(true);
+      try {
+        const micItem = await buildMicrophoneHealthItem();
+        const report = await window.voiceNoteAI.getHealthCheck({
+          includeExternal: options?.includeExternal === true,
+          microphone: {
+            status: micItem.status,
+            message: micItem.message,
+          },
+        });
+        const backendItems = report.items.map((item) => ({
+          id: item.id,
+          status: item.status,
+          message: item.message,
+        })) as UiHealthItem[];
+        setHealthItems(backendItems);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setHealthItems([
+          {
+            id: 'network',
+            status: 'error',
+            message: `Falha ao executar o diagnóstico: ${message}`,
+          },
+        ]);
+      } finally {
+        setHealthLoading(false);
+      }
+    },
+    [buildMicrophoneHealthItem, hasDesktopApi],
+  );
 
   const ensureSelectedMicrophoneAvailable = useCallback(async () => {
     const refreshed = await refreshDevices();
@@ -186,7 +213,8 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
     setMicDeviceId('');
     toastRef.current({
       title: 'Microfone ajustado',
-      description: 'O dispositivo selecionado não foi encontrado. O app voltou ao microfone padrão.',
+      description:
+        'O dispositivo selecionado não foi encontrado. O app voltou ao microfone padrão.',
     });
   }, [refreshDevices]);
 
@@ -231,38 +259,25 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
       setStatusSafely('listening');
 
       try {
-        const sttStart = window.voiceNoteAI.startStt({ sessionId: newSessionId });
-        const captureStart = startCapture(
-          newSessionId,
-          micDeviceIdRef.current || null,
-          micInputGainRef.current,
-        );
-        const [sttResult, captureResult] = await Promise.allSettled([sttStart, captureStart]);
-
-        if (sttResult.status === 'rejected' || captureResult.status === 'rejected') {
-          if (sttResult.status === 'fulfilled') {
-            try {
-              await window.voiceNoteAI.stopStt(newSessionId);
-            } catch {
-              // ignore
-            }
-          }
-
-          try {
-            await stopCapture();
-          } catch {
-            // ignore
-          }
-
-          throw sttResult.status === 'rejected'
-            ? sttResult.reason
-            : captureResult.status === 'rejected'
-              ? captureResult.reason
-              : new Error('Falha ao iniciar a sessão de ditado.');
-        }
+        await startCapture(newSessionId, micDeviceIdRef.current || null, micInputGainRef.current);
       } catch (captureError) {
         resetSessionState('error');
-        throw captureError;
+        throw normalizeCaptureStartError(captureError);
+      }
+
+      try {
+        await window.voiceNoteAI.startStt({ sessionId: newSessionId });
+      } catch (sttError) {
+        try {
+          await stopCapture();
+        } catch {
+          // ignore
+        }
+
+        resetSessionState('error');
+        throw sttError instanceof Error
+          ? sttError
+          : new Error(String(sttError ?? 'Falha ao iniciar a sessão de ditado.'));
       }
     },
     [resetSessionState, setStatusSafely],
@@ -272,7 +287,14 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
     async (currentSessionId: string) => {
       setStatusSafely('finalizing');
       await stopCapture();
-      await window.voiceNoteAI.stopStt(currentSessionId);
+      const result = await window.voiceNoteAI.stopStt(currentSessionId);
+      if (result.message) {
+        toastRef.current({
+          title: result.timedOut ? 'Sessão encerrada automaticamente' : 'Sessão finalizada',
+          description: result.message,
+          variant: result.ok ? 'default' : 'destructive',
+        });
+      }
       setStatusSafely('idle');
       resetSessionState();
     },
@@ -308,21 +330,32 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
     try {
       await begin(crypto.randomUUID());
     } catch (error) {
+      const normalized = normalizeCaptureStartError(error);
       setStatusSafely('error');
-      setError(String(error));
+      setError(normalized.message);
       toastRef.current({
         title: 'Falha ao iniciar ditado',
-        description: error instanceof Error ? error.message : String(error),
+        description: normalized.message,
         variant: 'destructive',
       });
+      if (activeTabRef.current === 'settings') void runHealthCheck();
     }
-  }, [begin, canControl, setStatusSafely, status]);
+  }, [begin, canControl, runHealthCheck, setStatusSafely, status]);
 
   const manualStop = useCallback(async () => {
     if (!canControl) return;
 
+    const currentSessionId = sessionIdRef.current;
+    if (!currentSessionId) {
+      setError(null);
+      setFinalText('');
+      setPartial('');
+      resetSessionState('idle');
+      return;
+    }
+
     try {
-      await end(sessionIdRef.current || 'force');
+      await end(currentSessionId);
     } catch (error) {
       setStatusSafely('error');
       setError(String(error));
@@ -332,7 +365,7 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
         variant: 'destructive',
       });
     }
-  }, [canControl, end, setStatusSafely]);
+  }, [canControl, end, resetSessionState, setStatusSafely]);
 
   const updateMicInputGain = useCallback((value: number) => {
     setMicInputGain(value);
@@ -353,7 +386,6 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
     if (!hasDesktopApi) return;
 
     void warmupCapturePipeline();
-    void primeMicrophone();
     void ensureSelectedMicrophoneAvailable();
     void loadRuntimeInfo();
 
@@ -390,14 +422,15 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
       try {
         await begin(nextSessionId);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const normalized = normalizeCaptureStartError(error);
         setStatusSafely('error');
-        setError(message);
+        setError(normalized.message);
         toastRef.current({
           title: 'Falha na captura',
-          description: message,
+          description: normalized.message,
           variant: 'destructive',
         });
+        if (activeTabRef.current === 'settings') void runHealthCheck();
       }
     });
 
@@ -461,11 +494,17 @@ export function useVoiceSession({ activeTab, hasDesktopApi, toast }: UseVoiceSes
         void window.voiceNoteAI.stopStt(pendingSession).catch(() => undefined);
       }
     };
-  }, [begin, end, ensureSelectedMicrophoneAvailable, hasDesktopApi, loadRuntimeInfo, pushPartial, resetSessionState, runHealthCheck, setStatusSafely]);
-
-  useEffect(() => {
-    if (hasDesktopApi) void primeMicrophone(micDeviceId || null);
-  }, [hasDesktopApi, micDeviceId]);
+  }, [
+    begin,
+    end,
+    ensureSelectedMicrophoneAvailable,
+    hasDesktopApi,
+    loadRuntimeInfo,
+    pushPartial,
+    resetSessionState,
+    runHealthCheck,
+    setStatusSafely,
+  ]);
 
   useEffect(() => {
     try {

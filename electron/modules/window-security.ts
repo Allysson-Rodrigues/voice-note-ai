@@ -1,4 +1,5 @@
 import type { BrowserWindow, Session } from 'electron';
+import { logInfo, logWarn } from '../logger.js';
 
 function withTrailingSlash(url: string) {
   return url.endsWith('/') ? url : `${url}/`;
@@ -18,6 +19,12 @@ function toOrigin(url: string) {
   }
 }
 
+function normalizeOriginLike(value: string | undefined) {
+  if (!value) return null;
+  if (value.startsWith('file://')) return 'file://';
+  return toOrigin(value) ?? value;
+}
+
 export function getTrustedAppOrigins(devServerUrl?: string) {
   const origins = new Set<string>(['file://']);
   if (!devServerUrl) return [...origins];
@@ -33,8 +40,9 @@ export function getTrustedAppOrigins(devServerUrl?: string) {
 }
 
 export function isTrustedAppOrigin(origin: string | undefined, devServerUrl?: string) {
-  if (!origin) return false;
-  return getTrustedAppOrigins(devServerUrl).includes(origin);
+  const normalized = normalizeOriginLike(origin);
+  if (!normalized) return false;
+  return getTrustedAppOrigins(devServerUrl).includes(normalized);
 }
 
 export function isTrustedAppUrl(url: string, devServerUrl?: string) {
@@ -85,6 +93,13 @@ function getDetailsRecord(details: unknown) {
   return details as Record<string, unknown>;
 }
 
+function extractMediaTypes(details?: unknown) {
+  const record = getDetailsRecord(details);
+  return Array.isArray(record.mediaTypes)
+    ? record.mediaTypes.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+}
+
 function extractRequestOrigin(
   webContents: { getURL?: () => string } | null | undefined,
   details?: unknown,
@@ -94,7 +109,12 @@ function extractRequestOrigin(
     typeof record.requestingOrigin === 'string' ? record.requestingOrigin : undefined;
   const securityOrigin =
     typeof record.securityOrigin === 'string' ? record.securityOrigin : undefined;
-  return requestingOrigin ?? securityOrigin ?? webContents?.getURL?.() ?? '';
+  return (
+    normalizeOriginLike(requestingOrigin) ??
+    normalizeOriginLike(securityOrigin) ??
+    normalizeOriginLike(webContents?.getURL?.()) ??
+    ''
+  );
 }
 
 export function isAllowedPermissionRequest(
@@ -105,10 +125,7 @@ export function isAllowedPermissionRequest(
 ) {
   if (permission !== 'media') return false;
   if (!isTrustedAppOrigin(origin, devServerUrl)) return false;
-  const record = getDetailsRecord(details);
-  const mediaTypes = Array.isArray(record.mediaTypes)
-    ? record.mediaTypes.filter((entry): entry is string => typeof entry === 'string')
-    : [];
+  const mediaTypes = extractMediaTypes(details);
   return !mediaTypes.includes('video');
 }
 
@@ -128,27 +145,25 @@ export function installSessionSecurity(session: Session, devServerUrl?: string) 
     });
   });
 
-  session.setPermissionCheckHandler((_webContents, permission, _requestingOrigin, details) => {
-    // Media (microphone) is always allowed — core app functionality
-    if (permission === 'media') {
-      const record = getDetailsRecord(details);
-      const mediaType = typeof record.mediaType === 'string' ? record.mediaType : '';
-      // Block video/camera, allow audio and unknown (enumerateDevices)
-      return mediaType !== 'video';
-    }
-    return false;
+  session.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    const origin = requestingOrigin || extractRequestOrigin(webContents, details);
+    return isAllowedPermissionRequest(permission, origin, details, devServerUrl);
   });
 
-  session.setPermissionRequestHandler((_webContents, permission, callback, details) => {
-    if (permission === 'media') {
-      const record = getDetailsRecord(details);
-      const mediaTypes = Array.isArray(record.mediaTypes)
-        ? record.mediaTypes.filter((entry): entry is string => typeof entry === 'string')
-        : [];
-      callback(!mediaTypes.includes('video'));
-      return;
-    }
-    callback(false);
+  session.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    const origin = extractRequestOrigin(webContents, details);
+    const allowed = isAllowedPermissionRequest(permission, origin, details, devServerUrl);
+    const context = {
+      permission,
+      origin,
+      mediaTypes: extractMediaTypes(details),
+      webContentsUrl: normalizeOriginLike(webContents?.getURL?.()) ?? '',
+      trusted: isTrustedAppOrigin(origin, devServerUrl),
+      decision: allowed ? 'allow' : 'deny',
+    };
+    if (allowed) logInfo('permission request allowed', context);
+    else logWarn('permission request denied', context);
+    callback(allowed);
   });
 
   return {

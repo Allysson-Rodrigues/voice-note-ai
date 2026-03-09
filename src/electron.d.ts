@@ -19,8 +19,23 @@ export type RuntimeInfo = {
 };
 
 export type HealthStatus = 'ok' | 'warn' | 'error';
+export type AzureCredentialSource = 'secure-store' | 'environment' | 'missing';
+export type AzureCredentialStatus = {
+  source: AzureCredentialSource;
+  storageMode: 'encrypted' | 'plain' | 'none';
+  hasStoredCredentials: boolean;
+  encryptionAvailable: boolean;
+  canPersistSecurely: boolean;
+  region?: string;
+  updatedAt?: string;
+};
+export type AzureConnectionResult = {
+  status: 'ok' | 'auth-error' | 'network-error' | 'config-error';
+  message: string;
+  host: string | null;
+};
 export type HealthCheckItem = {
-  id: 'stt' | 'network' | 'hook' | 'history' | 'phrases' | 'injection' | 'security';
+  id: 'stt' | 'network' | 'hook' | 'history' | 'phrases' | 'injection' | 'security' | 'microphone';
   status: HealthStatus;
   message: string;
 };
@@ -42,7 +57,40 @@ export type AppProfile = {
   injectionMethod?: 'target-handle' | 'foreground-handle' | 'ctrl-v' | 'shift-insert';
   languageBias?: 'pt-BR' | 'en-US' | 'mixed';
   postprocessProfile?: 'safe' | 'balanced' | 'aggressive';
+  domain?: 'general' | 'work' | 'support' | 'medical' | 'legal' | 'custom';
+  extraPhrases?: string[];
+  formatStyle?: 'message' | 'paragraph' | 'bullet-list' | 'email' | 'notes' | 'technical-note';
+  rewriteEnabled?: boolean;
+  protectedTerms?: string[];
 };
+
+export type AdaptiveSuggestion =
+  | {
+      id: string;
+      type: 'protected-term';
+      appKey: string;
+      confidence: number;
+      reason: string;
+      payload: { term: string };
+    }
+  | {
+      id: string;
+      type: 'format-style';
+      appKey: string;
+      confidence: number;
+      reason: string;
+      payload: {
+        formatStyle: 'message' | 'paragraph' | 'bullet-list' | 'email' | 'notes' | 'technical-note';
+      };
+    }
+  | {
+      id: string;
+      type: 'language-bias';
+      appKey: string;
+      confidence: number;
+      reason: string;
+      payload: { languageBias: 'pt-BR' | 'en-US' };
+    };
 
 export type HistoryStorageMode = 'plain' | 'encrypted';
 
@@ -67,6 +115,12 @@ export type HistoryEntry = {
     best?: number;
     mode?: string;
   };
+  intent?: string;
+  rewriteApplied?: boolean;
+  rewriteRisk?: 'low' | 'medium' | 'high';
+  appKey?: string;
+  injectionMethod?: string;
+  confidenceBucket?: 'high' | 'medium' | 'low';
   createdAt: string;
 };
 
@@ -115,8 +169,12 @@ declare global {
       clearHistory: (params?: { before?: string }) => Promise<{ ok: boolean; removed: number }>;
       startStt: (payload: { sessionId: string; language?: string }) => Promise<{ ok: boolean }>;
       sendAudio: (sessionId: string, pcm16kMonoInt16: ArrayBuffer) => void;
-      stopStt: (sessionId: string) => Promise<{ ok: boolean; text?: string }>;
+      stopStt: (
+        sessionId: string,
+      ) => Promise<{ ok: boolean; text?: string; timedOut?: boolean; message?: string }>;
       getSettings: () => Promise<{
+        hotkeyPrimary: string;
+        hotkeyFallback: string;
         autoPasteEnabled: boolean;
         toneMode: 'formal' | 'casual' | 'very-casual';
         languageMode: 'pt-BR' | 'en-US' | 'dual';
@@ -132,11 +190,36 @@ declare global {
         historyStorageMode: HistoryStorageMode;
         postprocessProfile: 'safe' | 'balanced' | 'aggressive';
         dualLanguageStrategy: 'parallel' | 'fallback-on-low-confidence';
+        rewriteEnabled: boolean;
+        rewriteMode: 'off' | 'safe' | 'aggressive';
+        intentDetectionEnabled: boolean;
+        protectedTerms: string[];
+        lowConfidencePolicy: 'paste' | 'copy-only' | 'review';
+        adaptiveLearningEnabled: boolean;
         appProfiles: Record<string, AppProfile>;
       }>;
       getRuntimeInfo: () => Promise<RuntimeInfo>;
-      getHealthCheck: () => Promise<HealthCheckReport>;
+      getAzureCredentialStatus: () => Promise<AzureCredentialStatus>;
+      testAzureCredentials: (payload: {
+        key: string;
+        region: string;
+      }) => Promise<AzureConnectionResult>;
+      saveAzureCredentials: (payload: {
+        key: string;
+        region: string;
+      }) => Promise<AzureCredentialStatus>;
+      clearAzureCredentials: () => Promise<AzureCredentialStatus>;
+      getHealthCheck: (payload?: {
+        includeExternal?: boolean;
+        microphone?: {
+          status: HealthStatus;
+          message: string;
+        };
+      }) => Promise<HealthCheckReport>;
       getPerfSummary: () => Promise<PerfSummary>;
+      listAdaptiveSuggestions: () => Promise<AdaptiveSuggestion[]>;
+      applyAdaptiveSuggestion: (id: string) => Promise<{ ok: boolean }>;
+      dismissAdaptiveSuggestion: (id: string) => Promise<{ ok: boolean }>;
       getRecentLogs: (params?: { limit?: number }) => Promise<
         Array<{
           level: 'info' | 'warn' | 'error' | 'perf';
@@ -148,6 +231,8 @@ declare global {
       retryHoldHook: () => Promise<{ ok: boolean; message: string }>;
       updateSettings: (
         partial: Partial<{
+          hotkeyPrimary: string;
+          hotkeyFallback: string;
           autoPasteEnabled: boolean;
           toneMode: 'formal' | 'casual' | 'very-casual';
           languageMode: 'pt-BR' | 'en-US' | 'dual';
@@ -163,6 +248,12 @@ declare global {
           historyStorageMode: HistoryStorageMode;
           postprocessProfile: 'safe' | 'balanced' | 'aggressive';
           dualLanguageStrategy: 'parallel' | 'fallback-on-low-confidence';
+          rewriteEnabled: boolean;
+          rewriteMode: 'off' | 'safe' | 'aggressive';
+          intentDetectionEnabled: boolean;
+          protectedTerms: string[];
+          lowConfidencePolicy: 'paste' | 'copy-only' | 'review';
+          adaptiveLearningEnabled: boolean;
           appProfiles: Record<string, AppProfile>;
         }>,
       ) => Promise<{ ok: boolean; settings?: unknown }>;

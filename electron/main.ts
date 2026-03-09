@@ -13,13 +13,19 @@ import {
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { AdaptiveStore } from './adaptive-store.js';
+import { AzureCredentialsStore } from './azure-credentials-store.js';
 import { DictionaryStore } from './dictionary-store.js';
 import { HistoryStore } from './history-store.js';
 import type { PasteAttempt } from './injection-plan.js';
 import {
   validateAutoPastePayload,
+  validateAdaptiveSuggestionPayload,
+  validateAzureCredentialsPayload,
   validateDictionaryAddPayload,
+  validateDictionaryImportPayload,
   validateDictionaryUpdatePayload,
+  validateHealthCheckPayload,
   validateHistoryClearPayload,
   validateHistoryListPayload,
   validateIdPayload,
@@ -31,11 +37,15 @@ import {
   getAzureConfigError,
   getAzureConfigMissingMessage,
   getHealthCheckReport,
+  testAzureSpeechConnection,
 } from './modules/health-check.js';
+import { generateAdaptiveSuggestions } from './modules/adaptive-learning.js';
 import { createHotkeyService } from './modules/hotkey.js';
 import { createHudWindowController } from './modules/hud-window.js';
 import { applyMainWindowBounds, createMainWindow } from './modules/main-window.js';
 import { createSttSessionManager } from './modules/stt-session.js';
+import { classifyTranscriptIntent } from './modules/transcript-intent.js';
+import { rewriteTranscript } from './modules/transcript-rewrite.js';
 import { createTextInjectionService } from './modules/text-injection.js';
 import { installSessionSecurity } from './modules/window-security.js';
 import { PerfStore } from './perf-store.js';
@@ -44,20 +54,34 @@ import {
   SettingsStore,
   type AppSettings,
   type InjectionMethod,
+  type LowConfidencePolicy,
 } from './settings-store.js';
-import { applyTranscriptPostprocess } from './transcript-postprocess.js';
+import { hotkeyLabelFromAccelerator } from './hotkey-config.js';
+import { inspectTranscriptPostprocess } from './transcript-postprocess.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-dotenv.config({ path: path.join(process.cwd(), '.env.local') });
-dotenv.config({ path: path.join(process.cwd(), '.env') });
+function loadRuntimeEnv() {
+  if (app.isPackaged) return;
+  const candidates = [
+    path.join(app.getAppPath(), '.env.local'),
+    path.join(app.getAppPath(), '.env'),
+    path.join(process.cwd(), '.env.local'),
+    path.join(process.cwd(), '.env'),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (!existsSync(candidate)) continue;
+    dotenv.config({ path: candidate });
+  }
+}
+
+loadRuntimeEnv();
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL;
 const IS_DEV = Boolean(DEV_SERVER_URL);
 const APP_ID = 'com.antigravity.vox-type';
 const APP_NAME = 'Vox Type';
-const PRIMARY_HOTKEY = process.env.VOICE_HOTKEY ?? 'CommandOrControl+Super';
-const FALLBACK_HOTKEY = process.env.VOICE_HOTKEY_FALLBACK ?? 'CommandOrControl+Super+Space';
 const HOLD_TO_TALK_ENABLED = (process.env.VOICE_HOLD_TO_TALK ?? '1') !== '0';
 const HUD_ENABLED = (process.env.VOICE_HUD ?? '1') !== '0';
 const HUD_DEBUG = (process.env.VOICE_HUD_DEBUG ?? '0') !== '0';
@@ -85,6 +109,8 @@ let settingsStore: SettingsStore | null = null;
 let dictionaryStore: DictionaryStore | null = null;
 let historyStore: HistoryStore | null = null;
 let perfStore: PerfStore | null = null;
+let adaptiveStore: AdaptiveStore | null = null;
+let azureCredentialsStore: AzureCredentialsStore | null = null;
 let isQuitting = false;
 let displayListenersAttached = false;
 let runtimeSecurity = {
@@ -109,6 +135,8 @@ function resolveDefaultHistoryStorageMode() {
 }
 
 let settings: AppSettings = {
+  hotkeyPrimary: process.env.VOICE_HOTKEY ?? 'CommandOrControl+Super',
+  hotkeyFallback: process.env.VOICE_HOTKEY_FALLBACK ?? 'CommandOrControl+Super+Space',
   autoPasteEnabled: parseBooleanEnv(process.env.VOICE_AUTO_PASTE) ?? true,
   toneMode:
     (process.env.VOICE_TONE ?? 'casual') === 'formal'
@@ -138,11 +166,27 @@ let settings: AppSettings = {
     (process.env.VOICE_DUAL_LANGUAGE_STRATEGY ?? 'fallback-on-low-confidence') === 'parallel'
       ? 'parallel'
       : 'fallback-on-low-confidence',
+  rewriteEnabled: parseBooleanEnv(process.env.VOICE_REWRITE_ENABLED) ?? true,
+  rewriteMode:
+    (process.env.VOICE_REWRITE_MODE ?? 'safe') === 'off'
+      ? 'off'
+      : (process.env.VOICE_REWRITE_MODE ?? 'safe') === 'aggressive'
+        ? 'aggressive'
+        : 'safe',
+  intentDetectionEnabled: parseBooleanEnv(process.env.VOICE_INTENT_DETECTION_ENABLED) ?? true,
+  protectedTerms: [],
+  lowConfidencePolicy:
+    (process.env.VOICE_LOW_CONFIDENCE_POLICY ?? 'review') === 'paste'
+      ? 'paste'
+      : (process.env.VOICE_LOW_CONFIDENCE_POLICY ?? 'review') === 'copy-only'
+        ? 'copy-only'
+        : 'review',
+  adaptiveLearningEnabled: parseBooleanEnv(process.env.VOICE_ADAPTIVE_LEARNING_ENABLED) ?? true,
   appProfiles: {},
 };
 
 let runtimeInfo: RuntimeInfo = {
-  hotkeyLabel: 'Ctrl+Win',
+  hotkeyLabel: hotkeyLabelFromAccelerator(settings.hotkeyPrimary),
   hotkeyMode: 'unavailable',
   holdToTalkActive: false,
   holdRequired: process.platform === 'win32',
@@ -174,12 +218,69 @@ function getPerfStore() {
   return perfStore;
 }
 
+function getAdaptiveStore() {
+  if (!adaptiveStore) {
+    adaptiveStore = new AdaptiveStore(path.join(app.getPath('userData'), 'adaptive.json'));
+  }
+  return adaptiveStore;
+}
+
+function getAzureCredentialsStore() {
+  if (!azureCredentialsStore) {
+    azureCredentialsStore = new AzureCredentialsStore(
+      path.join(app.getPath('userData'), 'azure-credentials.json'),
+      {
+        isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+        encryptString: (value) => safeStorage.encryptString(value).toString('base64'),
+        decryptString: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')),
+      },
+    );
+  }
+  return azureCredentialsStore;
+}
+
+function getResolvedAzureCredentials() {
+  return getAzureCredentialsStore().resolve();
+}
+
+function getAzureCredentialStatus() {
+  return getAzureCredentialsStore().getStatus();
+}
+
+function tokenizePhraseCandidates(text: string) {
+  return text
+    .split(/[^A-Za-zÀ-ÿ0-9+#.-]+/g)
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length >= 3 && entry.length <= 32)
+    .filter((entry) => /[A-Za-zÀ-ÿ]/.test(entry));
+}
+
+async function getRecentHistoryPhrases(limit = 40) {
+  try {
+    const entries = await getHistoryStore().list({ limit });
+    const counts = new Map<string, number>();
+    for (const entry of entries) {
+      for (const token of tokenizePhraseCandidates(entry.text)) {
+        const key = token.toLocaleLowerCase();
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+    }
+
+    return [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 60)
+      .map(([token]) => token);
+  } catch {
+    return [];
+  }
+}
+
 const hudController = createHudWindowController({
   enabled: HUD_ENABLED,
   debug: HUD_DEBUG,
   devServerUrl: DEV_SERVER_URL,
   getIconPath,
-  getPreloadPath,
+  getHudPreloadPath,
   resolveDistFile: (filename) => path.join(__dirname, '..', 'dist', filename),
   getPreferredDisplay,
   onHoverChange: (hovered) => {
@@ -229,11 +330,13 @@ function setRuntimeBlocked(reason?: string) {
 
 function resolveCaptureBlockedReason() {
   const existing = runtimeInfo.captureBlockedReason;
-  if (existing && existing !== getAzureConfigMissingMessage({ isPackaged: app.isPackaged })) {
+  if (existing && existing !== getAzureConfigMissingMessage()) {
     return existing;
   }
 
-  return getAzureConfigError({ isPackaged: app.isPackaged });
+  return getAzureConfigError({
+    credentials: getResolvedAzureCredentials(),
+  });
 }
 
 function refreshCaptureBlockedReason() {
@@ -252,11 +355,16 @@ function getPreferredDisplay() {
 }
 
 function getIconPath() {
-  const candidates = [
-    path.join(process.cwd(), 'public', 'favicon.ico'),
-    path.join(app.getAppPath(), 'public', 'favicon.ico'),
-    path.join(__dirname, '..', 'public', 'favicon.ico'),
-  ];
+  const candidates = app.isPackaged
+    ? [
+        path.join(app.getAppPath(), 'public', 'favicon.ico'),
+        path.join(__dirname, '..', 'public', 'favicon.ico'),
+      ]
+    : [
+        path.join(process.cwd(), 'public', 'favicon.ico'),
+        path.join(app.getAppPath(), 'public', 'favicon.ico'),
+        path.join(__dirname, '..', 'public', 'favicon.ico'),
+      ];
   for (const candidate of candidates) {
     if (existsSync(candidate)) return candidate;
   }
@@ -264,9 +372,19 @@ function getIconPath() {
 }
 
 function getPreloadPath() {
-  const local = path.join(process.cwd(), 'electron', 'preload.cjs');
-  if (existsSync(local)) return local;
+  if (!app.isPackaged) {
+    const local = path.join(process.cwd(), 'electron', 'preload.cjs');
+    if (existsSync(local)) return local;
+  }
   return path.join(__dirname, '..', 'electron', 'preload.cjs');
+}
+
+function getHudPreloadPath() {
+  if (!app.isPackaged) {
+    const local = path.join(process.cwd(), 'electron', 'hud-preload.cjs');
+    if (existsSync(local)) return local;
+  }
+  return path.join(__dirname, '..', 'electron', 'hud-preload.cjs');
 }
 
 function applyAdaptiveBounds() {
@@ -324,19 +442,103 @@ const textInjectionService = createTextInjectionService({
   rememberInjectionMethod,
 });
 
-async function postprocessTranscript(rawText: string) {
-  const base = applyTranscriptPostprocess(rawText, {
+const LOW_CONFIDENCE_BUCKET_THRESHOLD = 0.6;
+
+function resolveConfidenceBucket(confidence?: number) {
+  if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0)
+    return 'low';
+  if (confidence >= 0.82) return 'high';
+  if (confidence >= LOW_CONFIDENCE_BUCKET_THRESHOLD) return 'medium';
+  return 'low';
+}
+
+function resolveLowConfidencePolicy(confidence?: number): LowConfidencePolicy {
+  const bucket = resolveConfidenceBucket(confidence);
+  if (bucket === 'high') return 'paste';
+  if (bucket === 'medium' && settings.lowConfidencePolicy === 'review') return 'review';
+  return settings.lowConfidencePolicy;
+}
+
+async function postprocessTranscript(args: {
+  rawText: string;
+  language: 'pt-BR' | 'en-US';
+  appKey?: string | null;
+  confidence?: number;
+}) {
+  const appProfile = settings.appProfiles?.[args.appKey ?? ''];
+  const safetySensitiveDomain = appProfile?.domain === 'medical' || appProfile?.domain === 'legal';
+  const effectivePostprocessProfile =
+    appProfile?.postprocessProfile ??
+    (safetySensitiveDomain ? 'safe' : settings.postprocessProfile);
+  const effectiveRewriteMode =
+    safetySensitiveDomain && settings.rewriteMode === 'aggressive' ? 'safe' : settings.rewriteMode;
+  const intent = settings.intentDetectionEnabled
+    ? classifyTranscriptIntent(args.rawText, {
+        appKey: args.appKey,
+        formatStyle: appProfile?.formatStyle,
+      })
+    : 'free-text';
+
+  const protectedTerms = [...settings.protectedTerms, ...(appProfile?.protectedTerms ?? [])];
+  const base = inspectTranscriptPostprocess(args.rawText, {
     toneMode: settings.toneMode,
     canonicalTerms: settings.canonicalTerms,
     formatCommandsEnabled: settings.formatCommandsEnabled,
-    profile: settings.postprocessProfile,
+    profile: effectivePostprocessProfile,
+    appKey: args.appKey,
+    intent,
+    language: args.language,
+    protectedTerms,
   });
-  return base;
+
+  const shouldRewrite =
+    settings.rewriteEnabled &&
+    effectiveRewriteMode !== 'off' &&
+    appProfile?.rewriteEnabled !== false &&
+    (args.confidence ?? 0) >= LOW_CONFIDENCE_BUCKET_THRESHOLD &&
+    base.finalText.length >= 18 &&
+    intent !== 'technical-note';
+
+  if (!shouldRewrite) {
+    return {
+      text: base.finalText,
+      appliedRules: base.appliedRules,
+      intent,
+      rewriteApplied: false,
+      rewriteRisk: 'low' as const,
+    };
+  }
+
+  const rewritten = rewriteTranscript({
+    rawText: base.finalText,
+    intent,
+    language: args.language,
+    appKey: args.appKey,
+    protectedTerms,
+    toneMode: settings.toneMode,
+  });
+
+  const allowRewrite =
+    rewritten.changed &&
+    (effectiveRewriteMode === 'aggressive' ||
+      rewritten.risk === 'low' ||
+      rewritten.risk === 'medium');
+
+  return {
+    text: allowRewrite ? rewritten.text : base.finalText,
+    appliedRules: allowRewrite
+      ? [...base.appliedRules, ...(rewritten.notes ?? []), `rewrite:${rewritten.risk}`]
+      : base.appliedRules,
+    intent,
+    rewriteApplied: allowRewrite,
+    rewriteRisk: rewritten.risk,
+  };
 }
 
 const sttManager = createSttSessionManager({
   isPackagedApp: app.isPackaged,
   getSettings: () => settings,
+  getAzureCredentials: () => getResolvedAzureCredentials(),
   getCaptureBlockedReason: () => refreshCaptureBlockedReason(),
   broadcast,
   setHudState,
@@ -348,14 +550,15 @@ const sttManager = createSttSessionManager({
   resolveInjectionTargetWindowHandle: textInjectionService.resolveInjectionTargetWindowHandle,
   injectText: textInjectionService.injectText,
   getDictionaryPhrases: async (seedPhrases) => {
-    return await getDictionaryStore().activePhrases(seedPhrases);
+    const historyPhrases = await getRecentHistoryPhrases();
+    return await getDictionaryStore().activePhrases([...seedPhrases, ...historyPhrases]);
   },
   onSessionCompleted: async (entry) => {
     await getPerfStore().append({
       sessionId: entry.sessionId,
       createdAt: new Date().toISOString(),
-      pttToFirstPartialMs: entry.pttToFirstPartialMs,
-      pttToFinalMs: entry.pttToFinalMs,
+      pttToFirstPartialMs: entry.pttToFirstPartialMs ?? -1,
+      pttToFinalMs: entry.pttToFinalMs ?? -1,
       injectTotalMs: entry.injectTotalMs,
       resolveWindowMs: entry.resolveWindowMs,
       pasteAttemptMs: entry.pasteAttemptMs,
@@ -365,14 +568,31 @@ const sttManager = createSttSessionManager({
       skippedReason: entry.skippedReason,
     });
     if (!settings.historyEnabled || settings.privacyMode) return;
-    await getHistoryStore().append(entry, settings.historyRetentionDays);
+    await getHistoryStore().append(
+      {
+        ...entry,
+        appKey: entry.appKey ?? undefined,
+        injectionMethod: entry.injectionMethod ?? undefined,
+      },
+      settings.historyRetentionDays,
+    );
+    if (settings.adaptiveLearningEnabled) {
+      await getAdaptiveStore().observeSession({
+        appKey: entry.appKey ?? undefined,
+        text: entry.text,
+        intent: entry.intent,
+        languageChosen: entry.languageChosen,
+        confidenceBucket: entry.confidenceBucket,
+      });
+    }
   },
   getAppProfile: (appKey) => settings.appProfiles?.[appKey ?? ''],
+  resolveLowConfidencePolicy,
 });
 
 const hotkeyService = createHotkeyService({
-  primaryHotkey: PRIMARY_HOTKEY,
-  fallbackHotkey: FALLBACK_HOTKEY,
+  getPrimaryHotkey: () => settings.hotkeyPrimary,
+  getFallbackHotkey: () => settings.hotkeyFallback,
   holdToTalkEnabled: HOLD_TO_TALK_ENABLED,
   holdHookRecoveryRetryMs: HOLD_HOOK_RECOVERY_RETRY_MS,
   getRuntimeInfo: () => runtimeInfo,
@@ -420,10 +640,37 @@ ipcMain.handle('app:runtime-info', async () => {
   return runtimeInfo;
 });
 
-ipcMain.handle('app:health-check', async () => {
+ipcMain.handle('app:azure-credentials-status', async () => {
+  return getAzureCredentialStatus();
+});
+
+ipcMain.handle('app:azure-credentials:test', async (_event, payload: unknown) => {
+  const credentials = validateAzureCredentialsPayload(payload);
+  return await testAzureSpeechConnection(credentials);
+});
+
+ipcMain.handle('app:azure-credentials:save', async (_event, payload: unknown) => {
+  const credentials = validateAzureCredentialsPayload(payload);
+  const status = await getAzureCredentialsStore().save(credentials);
+  sttManager.invalidateRuntimeCaches();
   refreshCaptureBlockedReason();
+  void sttManager.prewarmStt();
+  return status;
+});
+
+ipcMain.handle('app:azure-credentials:clear', async () => {
+  const status = await getAzureCredentialsStore().clear();
+  sttManager.invalidateRuntimeCaches();
+  refreshCaptureBlockedReason();
+  return status;
+});
+
+ipcMain.handle('app:health-check', async (_event, payload?: unknown) => {
+  refreshCaptureBlockedReason();
+  const healthPayload = validateHealthCheckPayload(payload);
+  const azureCredentialStatus = getAzureCredentialStatus();
+  const azureCredentials = getResolvedAzureCredentials();
   return await getHealthCheckReport({
-    isPackagedApp: app.isPackaged,
     holdToTalkEnabled: HOLD_TO_TALK_ENABLED,
     holdHookActive: Boolean(hotkeyService.getStopHoldHook()),
     perfSummary: await getPerfStore().getSummary(),
@@ -434,6 +681,19 @@ ipcMain.handle('app:health-check', async () => {
     isEncryptionAvailable: safeStorage.isEncryptionAvailable(),
     phraseBoostCount: await sttManager.getPhraseBoostCount(),
     runtimeSecurity,
+    azureCredentialSource: azureCredentialStatus.source,
+    azureCredentialStorageMode: azureCredentialStatus.storageMode,
+    azureCredentials,
+    includeExternalAzureCheck: healthPayload.includeExternal === true,
+    testAzureConnection:
+      healthPayload.includeExternal === true
+        ? () =>
+            testAzureSpeechConnection({
+              key: azureCredentials.key,
+              region: azureCredentials.region,
+            })
+        : null,
+    microphone: healthPayload.microphone,
   });
 });
 
@@ -449,18 +709,114 @@ ipcMain.handle('app:logs:recent', async (_event, payload?: { limit?: number }) =
   return getRecentLogs(payload?.limit ?? 50);
 });
 
+ipcMain.handle('adaptive:list', async () => {
+  if (!settings.adaptiveLearningEnabled) return [];
+  return generateAdaptiveSuggestions(getAdaptiveStore().get(), settings);
+});
+
+ipcMain.handle('adaptive:apply', async (_event, payload: unknown) => {
+  if (!settingsStore) return { ok: false };
+  const { id } = validateAdaptiveSuggestionPayload(payload);
+  const suggestion = generateAdaptiveSuggestions(getAdaptiveStore().get(), settings).find(
+    (item) => item.id === id,
+  );
+  if (!suggestion) throw new Error('Sugestão adaptativa não encontrada.');
+
+  if (suggestion.type === 'protected-term') {
+    settings = await settingsStore.update({
+      appProfiles: {
+        ...(settings.appProfiles ?? {}),
+        [suggestion.appKey]: {
+          ...(settings.appProfiles?.[suggestion.appKey] ?? {}),
+          protectedTerms: [
+            ...new Set([
+              ...((settings.appProfiles?.[suggestion.appKey]?.protectedTerms ?? []) as string[]),
+              suggestion.payload.term,
+            ]),
+          ],
+        },
+      },
+    });
+  } else if (suggestion.type === 'format-style') {
+    settings = await settingsStore.update({
+      appProfiles: {
+        ...(settings.appProfiles ?? {}),
+        [suggestion.appKey]: {
+          ...(settings.appProfiles?.[suggestion.appKey] ?? {}),
+          formatStyle: suggestion.payload.formatStyle,
+        },
+      },
+    });
+  } else if (suggestion.type === 'language-bias') {
+    settings = await settingsStore.update({
+      appProfiles: {
+        ...(settings.appProfiles ?? {}),
+        [suggestion.appKey]: {
+          ...(settings.appProfiles?.[suggestion.appKey] ?? {}),
+          languageBias: suggestion.payload.languageBias,
+        },
+      },
+    });
+  }
+
+  await getAdaptiveStore().dismissSuggestion(id);
+  sttManager.markPhraseCacheDirty();
+  return { ok: true };
+});
+
+ipcMain.handle('adaptive:dismiss', async (_event, payload: unknown) => {
+  const { id } = validateAdaptiveSuggestionPayload(payload);
+  await getAdaptiveStore().dismissSuggestion(id);
+  return { ok: true };
+});
+
 ipcMain.handle('settings:update', async (_event, payload: unknown) => {
   if (!settingsStore) return { ok: false };
   const partial = validateSettingsUpdate(payload);
+  const previousSettings = settings;
+  const nextSettings = settingsStore.previewUpdate(partial as Partial<AppSettings>);
+
+  if ('hotkeyPrimary' in partial || 'hotkeyFallback' in partial) {
+    const hotkeyValidation = hotkeyService.validateHotkeyConfiguration({
+      primaryHotkey: nextSettings.hotkeyPrimary,
+      fallbackHotkey: nextSettings.hotkeyFallback,
+    });
+    if (!hotkeyValidation.ok) {
+      throw new Error(hotkeyValidation.message);
+    }
+  }
+
   settings = await settingsStore.update(partial as Partial<AppSettings>);
-  if ('historyRetentionDays' in partial || 'historyEnabled' in partial) {
-    await getHistoryStore().prune(settings.historyRetentionDays);
-  }
-  sttManager.markPhraseCacheDirty();
-  if ('sttProvider' in partial) {
+
+  try {
+    if ('hotkeyPrimary' in partial || 'hotkeyFallback' in partial) {
+      const hotkeyReload = await hotkeyService.reloadHotkeys({
+        primaryHotkey: settings.hotkeyPrimary,
+        fallbackHotkey: settings.hotkeyFallback,
+      });
+      if (!hotkeyReload.ok) {
+        throw new Error(hotkeyReload.message);
+      }
+    }
+
+    if ('historyRetentionDays' in partial || 'historyEnabled' in partial) {
+      await getHistoryStore().prune(settings.historyRetentionDays);
+    }
+
+    sttManager.markPhraseCacheDirty();
     refreshCaptureBlockedReason();
+    return { ok: true, settings };
+  } catch (error) {
+    settings = await settingsStore.replace(previousSettings);
+    if ('hotkeyPrimary' in partial || 'hotkeyFallback' in partial) {
+      await hotkeyService.reloadHotkeys({
+        primaryHotkey: previousSettings.hotkeyPrimary,
+        fallbackHotkey: previousSettings.hotkeyFallback,
+      });
+    }
+    refreshCaptureBlockedReason();
+    throw error;
   }
-  return { ok: true, settings };
 });
 
 ipcMain.handle('settings:autoPaste', async (_event, payload: unknown) => {
@@ -487,16 +843,12 @@ ipcMain.handle('dictionary:export', async () => {
   return await getDictionaryStore().export();
 });
 
-ipcMain.handle(
-  'dictionary:import',
-  async (_event, payload: { terms: unknown[]; mode?: 'replace' | 'merge' }) => {
-    const terms = Array.isArray(payload?.terms) ? payload.terms : [];
-    const mode = payload?.mode === 'replace' ? 'replace' : 'merge';
-    const result = await getDictionaryStore().import({ terms: terms as never, mode });
-    sttManager.markPhraseCacheDirty();
-    return result;
-  },
-);
+ipcMain.handle('dictionary:import', async (_event, payload: unknown) => {
+  const { terms, mode } = validateDictionaryImportPayload(payload);
+  const result = await getDictionaryStore().import({ terms: terms as never, mode });
+  sttManager.markPhraseCacheDirty();
+  return result;
+});
 
 ipcMain.handle('dictionary:add', async (_event, payload: unknown) => {
   const validPayload = validateDictionaryAddPayload(payload);
@@ -610,10 +962,12 @@ async function bootstrap() {
     app.setPath('userData', devUserData);
   }
 
+  await getAzureCredentialsStore().load();
   settingsStore = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'), settings);
   settings = await settingsStore.load();
   await getHistoryStore().prune(settings.historyRetentionDays);
   void getPerfStore();
+  await getAdaptiveStore().load();
 
   sttManager.markPhraseCacheDirty();
   void sttManager.prewarmStt();
@@ -623,6 +977,7 @@ async function bootstrap() {
     holdToTalk: HOLD_TO_TALK_ENABLED,
     privacyMode: settings.privacyMode,
     historyStorageMode: settings.historyStorageMode,
+    azureCredentialSource: getResolvedAzureCredentials().source,
   });
 
   mainWindow = await createMainWindow({
@@ -651,32 +1006,10 @@ async function bootstrap() {
   applyAdaptiveBounds();
   setHudState({ state: 'idle' });
 
-  try {
-    const stopper = await hotkeyService.tryStartHoldToTalkHook();
-    hotkeyService.setStopHoldHook(stopper);
-  } catch {
-    hotkeyService.setStopHoldHook(null);
-  }
-
-  if (process.platform === 'win32') {
-    if (!HOLD_TO_TALK_ENABLED) {
-      const message = 'PTT indisponivel: VOICE_HOLD_TO_TALK esta desativado.';
-      setRuntimeBlocked(message);
-      emitAppError(message);
-      setHudState({ state: 'error', message });
-    } else if (!hotkeyService.getStopHoldHook()) {
-      const message = 'PTT indisponivel: hook global nao carregou (uiohook-napi).';
-      setRuntimeBlocked(message);
-      emitAppError(message);
-      setHudState({ state: 'error', message });
-      hotkeyService.scheduleHoldHookRecovery();
-    }
-  } else if (!hotkeyService.getStopHoldHook()) {
-    hotkeyService.registerToggleHotkey();
-  }
+  await hotkeyService.reloadHotkeys();
 
   const startupBlockedReason = refreshCaptureBlockedReason();
-  if (startupBlockedReason === getAzureConfigMissingMessage({ isPackaged: app.isPackaged })) {
+  if (startupBlockedReason === getAzureConfigMissingMessage()) {
     emitAppError(startupBlockedReason);
     setHudState({ state: 'error', message: startupBlockedReason });
   }

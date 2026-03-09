@@ -196,7 +196,7 @@ type HudWindowControllerOptions = {
   debug: boolean;
   devServerUrl?: string;
   getIconPath: () => string | undefined;
-  getPreloadPath: () => string;
+  getHudPreloadPath: () => string;
   resolveDistFile: (filename: string) => string;
   getPreferredDisplay: () => Electron.Display;
   onHoverChange: (hovered: boolean) => void;
@@ -284,7 +284,7 @@ export function createHudWindowController(options: HudWindowControllerOptions) {
         nodeIntegration: false,
         webSecurity: true,
         allowRunningInsecureContent: false,
-        preload: options.getPreloadPath(),
+        preload: options.getHudPreloadPath(),
       },
     });
     hardenBrowserWindow(hudWindow, options.devServerUrl);

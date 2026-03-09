@@ -1,8 +1,10 @@
 import type { ExtendedStatus } from './types';
 import type { HealthStatus } from '@/electron';
 
-export function statusDotClass(status: ExtendedStatus) {
+export function statusDotClass(status: ExtendedStatus | 'loading') {
   switch (status) {
+    case 'loading':
+      return 'bg-yellow-500 shadow-[0_0_0_3px_rgba(234,179,8,0.15)]';
     case 'listening':
       return 'bg-state-listening shadow-[0_0_0_3px_rgba(244,63,94,0.15)]';
     case 'finalizing':

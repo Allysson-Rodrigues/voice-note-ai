@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -50,6 +50,34 @@ describe('history store', () => {
     const filtered = await store.list({ query: 'importante' });
     expect(filtered).toHaveLength(1);
     expect(filtered[0]?.sessionId).toBe('a2');
+  });
+
+  it('persists intent and rewrite metadata for enriched history entries', async () => {
+    const { store } = await createStore();
+
+    await store.append(
+      {
+        sessionId: 'smart-1',
+        text: '• revisar contrato\n• enviar proposta',
+        pasted: false,
+        retryCount: 0,
+        sessionDurationMs: 1500,
+        injectTotalMs: 90,
+        intent: 'bullet-list',
+        rewriteApplied: true,
+        rewriteRisk: 'low',
+        appKey: 'outlook',
+        injectionMethod: 'ctrl-v',
+        confidenceBucket: 'medium',
+      },
+      30,
+    );
+
+    const [entry] = await store.list();
+    expect(entry?.intent).toBe('bullet-list');
+    expect(entry?.rewriteApplied).toBe(true);
+    expect(entry?.appKey).toBe('outlook');
+    expect(entry?.confidenceBucket).toBe('medium');
   });
 
   it('prunes by retention days and supports remove/clear', async () => {
@@ -115,15 +143,16 @@ describe('history store', () => {
     expect(await store.list()).toHaveLength(0);
   });
 
-  it('self-heals malformed file on load', async () => {
+  it('quarentines malformed files instead of silently overwriting them', async () => {
     const { store, filePath } = await createStore();
     await writeFile(filePath, '{not-json', 'utf8');
 
     const entries = await store.list();
     expect(entries).toHaveLength(0);
 
-    const content = await readFile(filePath, 'utf8');
-    expect(content.trim()).toBe('[]');
+    await expect(readFile(filePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    const files = await readdir(path.dirname(filePath));
+    expect(files.some((name) => name.startsWith('history.json.corrupt.'))).toBe(true);
   });
 
   it('does not persist raw transcripts for new entries', async () => {
@@ -148,7 +177,7 @@ describe('history store', () => {
     expect((await store.list())[0]?.rawText).toBeUndefined();
   });
 
-  it('preserves compatibility when loading legacy rawText entries', async () => {
+  it('remove rawText legado ao migrar historico antigo', async () => {
     const { store, filePath } = await createStore();
     await writeFile(
       filePath,
@@ -169,6 +198,41 @@ describe('history store', () => {
     );
 
     const entries = await store.list();
-    expect(entries[0]?.rawText).toBe('texto bruto legado');
+    expect(entries[0]?.rawText).toBeUndefined();
+    const persisted = await readFile(filePath, 'utf8');
+    expect(persisted).not.toContain('texto bruto legado');
+  });
+
+  it('nao regrava snapshots ja normalizados durante leituras simples', async () => {
+    const { store, filePath } = await createStore();
+    await writeFile(
+      filePath,
+      JSON.stringify(
+        {
+          version: 1,
+          data: [
+            {
+              id: 'current-1',
+              sessionId: 'current',
+              text: 'texto atual',
+              pasted: true,
+              retryCount: 0,
+              sessionDurationMs: 400,
+              injectTotalMs: 40,
+              createdAt: '2026-03-05T00:00:00.000Z',
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    await store.list();
+
+    const files = await readdir(path.dirname(filePath));
+    expect(files).toContain('history.json');
+    expect(files).not.toContain('history.json.bak');
   });
 });

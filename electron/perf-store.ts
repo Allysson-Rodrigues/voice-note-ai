@@ -1,5 +1,10 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import {
+  quarantineFile,
+  readTextFilePair,
+  unwrapStoreEnvelope,
+  wrapStoreEnvelope,
+  writeTextFileAtomic,
+} from './store-utils.js';
 
 export type PerfSample = {
   sessionId: string;
@@ -49,7 +54,10 @@ function parseSample(raw: unknown): PerfSample | null {
   if (!item.sessionId || typeof item.sessionId !== 'string') return null;
   return {
     sessionId: item.sessionId,
-    createdAt: typeof item.createdAt === 'string' && item.createdAt ? item.createdAt : new Date().toISOString(),
+    createdAt:
+      typeof item.createdAt === 'string' && item.createdAt
+        ? item.createdAt
+        : new Date().toISOString(),
     pttToFirstPartialMs: clampInt(item.pttToFirstPartialMs, -1, 600000, -1),
     pttToFinalMs: clampInt(item.pttToFinalMs, -1, 600000, -1),
     injectTotalMs: clampInt(item.injectTotalMs, -1, 600000, -1),
@@ -116,30 +124,50 @@ export class PerfStore {
   }
 
   private async loadRaw(): Promise<PerfSample[]> {
-    try {
-      const content = await readFile(this.filePath, 'utf8');
-      const parsed = JSON.parse(content);
-      if (!Array.isArray(parsed)) {
-        await this.persist([]);
-        return [];
+    const pair = await readTextFilePair(this.filePath);
+    const primary = this.tryParse(pair.primary);
+    if (primary) {
+      if (primary.needsMigration) {
+        await this.persist(primary.samples);
       }
-      const samples = parsed.map((entry) => parseSample(entry)).filter((entry): entry is PerfSample => Boolean(entry));
-      await this.persist(samples);
-      return samples;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return [];
-      if (error instanceof SyntaxError) {
-        await this.persist([]);
-        return [];
-      }
-      throw error;
+      return primary.samples;
     }
+
+    const backup = this.tryParse(pair.backup);
+    if (backup) {
+      await this.persist(backup.samples);
+      return backup.samples;
+    }
+
+    if (pair.primary != null) {
+      await quarantineFile(this.filePath, 'corrupt');
+    }
+
+    return [];
   }
 
   private async persist(samples: PerfSample[]): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(samples, null, 2), 'utf8');
+    await writeTextFileAtomic(this.filePath, JSON.stringify(wrapStoreEnvelope(samples), null, 2));
+  }
+
+  private tryParse(content: string | null) {
+    if (content == null) return null;
+
+    try {
+      const raw = JSON.parse(content);
+      const envelope = unwrapStoreEnvelope<unknown>(raw);
+      const samples = !Array.isArray(envelope.data)
+        ? []
+        : envelope.data
+            .map((entry) => parseSample(entry))
+            .filter((entry): entry is PerfSample => Boolean(entry));
+      return {
+        samples,
+        needsMigration: envelope.version < 1,
+      };
+    } catch {
+      return null;
+    }
   }
 }
 

@@ -1,13 +1,8 @@
-import CaptureTab from '@/components/index/CaptureTab';
 import type { ActiveTab, ExtendedStatus } from '@/components/index/types';
-import { clampHistoryRetentionDays, statusDotClass } from '@/components/index/utils';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import WindowTitleBar from '@/components/WindowTitleBar';
 import { useToast } from '@/hooks/use-toast';
-import { useAppSettings } from '@/hooks/useAppSettings';
-import { useDictionary } from '@/hooks/useDictionary';
-import { useHistory } from '@/hooks/useHistory';
-import { useVoiceSession } from '@/hooks/useVoiceSession';
 import {
   BookOpen,
   History,
@@ -18,393 +13,234 @@ import {
   Settings,
   Sun,
 } from 'lucide-react';
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import IndexTabPanels from './index/IndexTabPanels';
+import { useIndexViewModel } from './index/useIndexViewModel';
 
-const DictionaryTab = lazy(() => import('@/components/index/DictionaryTab'));
-const HistoryTab = lazy(() => import('@/components/index/HistoryTab'));
-const SettingsTab = lazy(() => import('@/components/index/SettingsTab'));
+const NAV_ITEMS: Array<{
+  value: ActiveTab;
+  label: string;
+  icon: typeof Mic;
+}> = [
+  { value: 'capture', label: 'Captura', icon: Mic },
+  { value: 'dictionary', label: 'Vocabulário', icon: BookOpen },
+  { value: 'history', label: 'Histórico', icon: History },
+  { value: 'settings', label: 'Configurações', icon: Settings },
+];
 
-const STATUS_LABELS: Record<ExtendedStatus, string> = {
+const STATUS_LABELS: Record<ExtendedStatus | 'loading', string> = {
   idle: 'Pronto',
   listening: 'Ouvindo',
   finalizing: 'Finalizando',
   injecting: 'Inserindo',
   success: 'Concluído',
   error: 'Atenção',
+  loading: 'Carregando...',
 };
 
-function tabFallback(label: string) {
-  return (
-    <div className="rounded-2xl border border-border/40 bg-muted/20 px-4 py-6 text-sm text-muted-foreground">
-      {label}
-    </div>
-  );
-}
+const STATUS_TONE_CLASS: Record<ExtendedStatus | 'loading', string> = {
+  idle: 'bg-green-500/10 text-green-500',
+  listening: 'bg-sky-500/10 text-sky-500',
+  finalizing: 'bg-amber-500/10 text-amber-500',
+  injecting: 'bg-violet-500/10 text-violet-500',
+  success: 'bg-emerald-500/10 text-emerald-500',
+  error: 'bg-red-500/10 text-red-500',
+  loading: 'bg-yellow-500/10 text-yellow-500',
+};
+
+const STATUS_DOT_CLASS: Record<ExtendedStatus | 'loading', string> = {
+  idle: 'bg-green-500',
+  listening: 'bg-sky-500',
+  finalizing: 'bg-amber-500',
+  injecting: 'bg-violet-500',
+  success: 'bg-emerald-500',
+  error: 'bg-red-500',
+  loading: 'bg-yellow-500',
+};
 
 const Index = () => {
   const { toast } = useToast();
   const hasDesktopApi = typeof window !== 'undefined' && Boolean(window.voiceNoteAI);
 
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    if (typeof document !== 'undefined') {
-      return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
-    }
-    return 'dark';
-  });
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('system');
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('light');
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
   const [activeTab, setActiveTab] = useState<ActiveTab>('capture');
 
   useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
+    const applyTheme = (t: 'light' | 'dark') => {
+      if (t === 'dark') {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    };
+
+    if (theme === 'system') {
+      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
+        ? 'dark'
+        : 'light';
+      setResolvedTheme(systemTheme);
+      applyTheme(systemTheme);
+      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+      const listener = (e: MediaQueryListEvent) => {
+        const nextTheme = e.matches ? 'dark' : 'light';
+        setResolvedTheme(nextTheme);
+        applyTheme(nextTheme);
+      };
+      mediaQuery.addEventListener('change', listener);
+      return () => mediaQuery.removeEventListener('change', listener);
     } else {
-      document.documentElement.classList.remove('dark');
+      setResolvedTheme(theme);
+      applyTheme(theme);
     }
   }, [theme]);
 
-  const history = useHistory({
+  const vm = useIndexViewModel({
     activeTab,
     hasDesktopApi,
     toast,
   });
-  const voiceSession = useVoiceSession({
-    activeTab,
-    hasDesktopApi,
-    toast,
-  });
-  const appSettings = useAppSettings({
-    hasDesktopApi,
-    toast,
-    onHealthCheck: voiceSession.runHealthCheck,
-    onHistoryRefresh: history.refreshHistory,
-  });
-  const dictionary = useDictionary({
-    activeTab,
-    hasDesktopApi,
-    toast,
-  });
-
-  const headerStatus: ExtendedStatus = voiceSession.error
-    ? 'error'
-    : voiceSession.status === 'idle'
-      ? 'idle'
-      : voiceSession.status;
+  const headerStatus: ExtendedStatus | 'loading' = vm.headerStatus;
 
   return (
-    <div
-      className={`h-screen w-screen overflow-hidden text-foreground transition-colors duration-300 ${
-        theme === 'dark' ? 'bg-[#0b0d10]' : 'bg-[#f6f3ec]'
-      }`}
-    >
-      <div className="workspace-shell relative flex h-full w-full overflow-hidden bg-transparent">
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as ActiveTab)}
-          className="flex h-full w-full"
+    <div className="relative h-screen w-screen overflow-hidden">
+      <div className="mesh-gradient" />
+      <div
+        className="grid h-screen w-screen min-h-0"
+        style={{ gridTemplateRows: isSidebarExpanded ? 'auto 1fr' : 'auto 1fr' }}
+      >
+        <header
+          className={`titlebar-drag glass flex items-center justify-between px-8 py-4 ${
+            isSidebarExpanded ? 'border-b border-border/40' : ''
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="titlebar-no-drag h-10 w-10 rounded-xl border border-border/40 bg-background/50"
+              aria-label={isSidebarExpanded ? 'Recolher navegação' : 'Expandir navegação'}
+              onClick={() => setIsSidebarExpanded((current) => !current)}
+            >
+              {isSidebarExpanded ? (
+                <PanelLeftClose className="h-4 w-4" />
+              ) : (
+                <PanelLeftOpen className="h-4 w-4" />
+              )}
+            </Button>
+            <h1 className="text-lg font-semibold text-foreground">Voice Note AI</h1>
+          </div>
+          <div className="flex items-center gap-4">
+            <div
+              className={`flex items-center gap-2 rounded-full px-3 py-1 ${STATUS_TONE_CLASS[headerStatus]}`}
+            >
+              <div className={`h-2 w-2 rounded-full ${STATUS_DOT_CLASS[headerStatus]}`} />
+              <span className="text-xs font-medium">{STATUS_LABELS[headerStatus]}</span>
+            </div>
+            <WindowTitleBar />
+          </div>
+        </header>
+        <div
+          className="grid min-h-0"
+          style={{
+            gridTemplateColumns: isSidebarExpanded ? '248px minmax(0, 1fr)' : '80px minmax(0, 1fr)',
+          }}
         >
           <aside
-            className={`relative z-10 flex flex-col gap-6 border-r border-border/10 bg-transparent py-6 transition-all duration-300 ease-in-out ${
-              isSidebarExpanded ? 'w-[252px] px-4' : 'w-[84px] px-2'
+            className={`glass flex min-h-0 flex-col overflow-y-auto border-r border-border/40 bg-[hsla(var(--sidebar-background))] text-[hsl(var(--sidebar-foreground))] ${
+              isSidebarExpanded ? 'gap-4 p-4' : 'items-center gap-3 px-3 py-4'
             }`}
           >
-            <div
-              className={`flex w-full items-center gap-3 titlebar-drag ${
-                isSidebarExpanded ? 'px-2' : 'justify-center'
-              }`}
+            <Tabs
+              value={activeTab}
+              onValueChange={(v) => setActiveTab(v as ActiveTab)}
+              orientation="vertical"
+              className="w-full"
             >
-              <div className="flex h-11 w-11 shrink-0 select-none items-center justify-center overflow-hidden rounded-2xl bg-black shadow-sm ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
-                <img
-                  src="./favicon.png"
-                  alt="Logotipo do Vox Type"
-                  className="h-full w-full object-cover"
-                />
+              <TabsList className="w-full">
+                {NAV_ITEMS.map(({ value, label, icon: Icon }) => (
+                  <TabsTrigger
+                    key={value}
+                    value={value}
+                    className={`transition-all duration-200 ${
+                      isSidebarExpanded
+                        ? 'w-full justify-start'
+                        : 'h-12 w-full justify-center rounded-2xl px-0'
+                    }`}
+                    aria-label={label}
+                    title={label}
+                  >
+                    <Icon className={isSidebarExpanded ? 'mr-2 h-4 w-4' : 'h-4 w-4'} />
+                    {isSidebarExpanded ? label : null}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            {isSidebarExpanded ? (
+              <div className="titlebar-no-drag mt-auto rounded-2xl border border-border/40 bg-background/50 p-2">
+                <div className="mb-2 px-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                  Aparência
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant={resolvedTheme === 'light' ? 'secondary' : 'ghost'}
+                    className="justify-start rounded-xl"
+                    onClick={() => setTheme('light')}
+                    aria-pressed={resolvedTheme === 'light'}
+                  >
+                    <Sun className="mr-2 h-4 w-4" />
+                    Claro
+                  </Button>
+                  <Button
+                    variant={resolvedTheme === 'dark' ? 'secondary' : 'ghost'}
+                    className="justify-start rounded-xl"
+                    onClick={() => setTheme('dark')}
+                    aria-pressed={resolvedTheme === 'dark'}
+                  >
+                    <Moon className="mr-2 h-4 w-4" />
+                    Escuro
+                  </Button>
+                </div>
               </div>
-              {isSidebarExpanded ? (
-                <div className="titlebar-drag flex flex-col overflow-hidden whitespace-nowrap">
-                  <span className="text-base font-bold tracking-tight text-foreground">
-                    Vox Type
-                  </span>
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Versão beta
-                  </span>
-                </div>
-              ) : null}
-            </div>
-
-            <TabsList className="titlebar-no-drag mt-4 flex h-auto w-full flex-col justify-start gap-2 bg-transparent p-0">
-              <TabsTrigger
-                value="capture"
-                title="Captura"
-                className={`group relative flex h-10 w-full items-center rounded-xl border border-transparent bg-transparent text-muted-foreground transition-all duration-200 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5 data-[state=active]:border-border/50 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm ${
-                  isSidebarExpanded ? 'justify-start gap-3 px-3' : 'justify-center px-0'
-                }`}
-              >
-                <Mic
-                  className={`h-4 w-4 shrink-0 ${!isSidebarExpanded ? 'group-hover:scale-110' : ''}`}
-                />
-                {isSidebarExpanded ? <span className="text-sm font-medium">Captura</span> : null}
-              </TabsTrigger>
-
-              <TabsTrigger
-                value="dictionary"
-                title="Vocabulário"
-                className={`group relative flex h-10 w-full items-center rounded-xl border border-transparent bg-transparent text-muted-foreground transition-all duration-200 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5 data-[state=active]:border-border/50 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm ${
-                  isSidebarExpanded ? 'justify-start gap-3 px-3' : 'justify-center px-0'
-                }`}
-              >
-                <BookOpen
-                  className={`h-4 w-4 shrink-0 ${!isSidebarExpanded ? 'group-hover:scale-110' : ''}`}
-                />
-                {isSidebarExpanded ? (
-                  <span className="text-sm font-medium">Vocabulário</span>
-                ) : null}
-              </TabsTrigger>
-
-              <TabsTrigger
-                value="history"
-                title="Histórico"
-                className={`group relative flex h-10 w-full items-center rounded-xl border border-transparent bg-transparent text-muted-foreground transition-all duration-200 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5 data-[state=active]:border-border/50 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm ${
-                  isSidebarExpanded ? 'justify-start gap-3 px-3' : 'justify-center px-0'
-                }`}
-              >
-                <History
-                  className={`h-4 w-4 shrink-0 ${!isSidebarExpanded ? 'group-hover:scale-110' : ''}`}
-                />
-                {isSidebarExpanded ? <span className="text-sm font-medium">Histórico</span> : null}
-              </TabsTrigger>
-
-              <TabsTrigger
-                value="settings"
-                title="Configurações"
-                className={`group relative mt-4 flex h-10 w-full items-center rounded-xl border border-transparent bg-transparent text-muted-foreground transition-all duration-200 hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5 data-[state=active]:border-border/50 data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-sm ${
-                  isSidebarExpanded ? 'justify-start gap-3 px-3' : 'justify-center px-0'
-                }`}
-              >
-                <Settings
-                  className={`h-4 w-4 shrink-0 ${!isSidebarExpanded ? 'group-hover:scale-110' : ''}`}
-                />
-                {isSidebarExpanded ? (
-                  <span className="text-sm font-medium">Configurações</span>
-                ) : null}
-              </TabsTrigger>
-            </TabsList>
-
-            <div className="titlebar-no-drag mt-auto flex w-full flex-col gap-2">
-              <button
-                onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-                title="Alternar tema"
-                className={`flex h-10 items-center rounded-xl text-muted-foreground transition-all hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5 ${
-                  isSidebarExpanded ? 'justify-start gap-3 px-3' : 'justify-center'
-                }`}
-              >
-                {theme === 'dark' ? (
-                  <Sun className="h-4 w-4 shrink-0" />
-                ) : (
-                  <Moon className="h-4 w-4 shrink-0" />
-                )}
-                {isSidebarExpanded ? (
-                  <span className="text-sm font-medium">Alternar tema</span>
-                ) : null}
-              </button>
-
-              <button
-                onClick={() => setIsSidebarExpanded((current) => !current)}
-                title={isSidebarExpanded ? 'Recolher menu' : 'Expandir menu'}
-                className={`flex h-10 items-center rounded-xl text-muted-foreground transition-all hover:bg-black/5 hover:text-foreground dark:hover:bg-white/5 ${
-                  isSidebarExpanded ? 'justify-start gap-3 px-3' : 'justify-center'
-                }`}
-              >
-                {isSidebarExpanded ? (
-                  <PanelLeftClose className="h-4 w-4 shrink-0" />
-                ) : (
-                  <PanelLeftOpen className="h-4 w-4 shrink-0" />
-                )}
-                {isSidebarExpanded ? (
-                  <span className="text-sm font-medium">Recolher menu</span>
-                ) : null}
-              </button>
-            </div>
+            ) : (
+              <div className="titlebar-no-drag mt-auto flex w-full flex-col items-center gap-2 rounded-[24px] border border-border/40 bg-background/50 px-2 py-3">
+                <Button
+                  variant={resolvedTheme === 'light' ? 'secondary' : 'ghost'}
+                  size="icon"
+                  className="h-11 w-11 rounded-2xl"
+                  onClick={() => setTheme('light')}
+                  aria-label="Ativar modo claro"
+                  aria-pressed={resolvedTheme === 'light'}
+                  title="Modo claro"
+                >
+                  <Sun className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant={resolvedTheme === 'dark' ? 'secondary' : 'ghost'}
+                  size="icon"
+                  className="h-11 w-11 rounded-2xl"
+                  onClick={() => setTheme('dark')}
+                  aria-label="Ativar modo escuro"
+                  aria-pressed={resolvedTheme === 'dark'}
+                  title="Modo escuro"
+                >
+                  <Moon className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </aside>
-
-          <div className="relative flex min-w-0 flex-1 flex-col py-2 pr-2">
-            <div className="pointer-events-none absolute inset-0 opacity-[0.03] dark:opacity-[0.15] bg-[radial-gradient(circle_at_50%_0%,_currentColor,_transparent_70%)]" />
-
-            <div className="relative z-10 flex flex-1 flex-col overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
-              <header className="titlebar-drag relative z-10 flex flex-wrap items-center justify-between gap-4 border-b border-border/40 bg-card/70 px-8 py-4 backdrop-blur-md">
-                <div className="min-w-0 titlebar-no-drag">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-                    Central de ditado
-                  </p>
-                  <div className="mt-1 flex items-center gap-3">
-                    <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                      Capture, revise e insira
-                    </h1>
-                  </div>
-                  <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-                    O fluxo principal fica em Captura; vocabulário, privacidade e histórico ficam ao
-                    lado quando você precisar ajustar.
-                  </p>
-                </div>
-
-                <div className="titlebar-no-drag flex items-center gap-3">
-                  <div className="group relative flex cursor-default items-center gap-3 rounded-full border border-border/50 bg-background px-4 py-2 shadow-sm">
-                    <span
-                      className={`relative h-2 w-2 rounded-full ${statusDotClass(headerStatus)}`}
-                      aria-hidden
-                    />
-                    <span className="text-xs font-semibold uppercase tracking-wide text-foreground">
-                      {STATUS_LABELS[headerStatus]}
-                    </span>
-                  </div>
-                  <WindowTitleBar />
-                </div>
-              </header>
-
-              <main className="titlebar-no-drag relative z-10 min-h-0 flex-1 overflow-y-auto px-8 py-6 custom-scrollbar">
-                {!hasDesktopApi ? (
-                  <div className="mb-6 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-                    Você está executando a interface web. A API desktop{' '}
-                    <span className="rounded bg-black/20 px-1 font-mono dark:bg-white/20">
-                      window.voiceNoteAI
-                    </span>{' '}
-                    não está disponível.
-                  </div>
-                ) : null}
-
-                {hasDesktopApi && voiceSession.runtimeInfo.captureBlockedReason ? (
-                  <div className="mb-6 rounded-2xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-                    {voiceSession.runtimeInfo.captureBlockedReason}
-                  </div>
-                ) : null}
-
-                <TabsContent
-                  value="capture"
-                  className="mt-0 animate-in fade-in slide-in-from-bottom-4 duration-500 outline-none"
-                >
-                  <CaptureTab
-                    autoPasteEnabled={appSettings.autoPasteEnabled}
-                    canControl={voiceSession.canControl}
-                    canStop={voiceSession.canStop}
-                    error={voiceSession.error}
-                    finalText={voiceSession.finalText}
-                    hasDesktopApi={hasDesktopApi}
-                    healthItems={voiceSession.healthItems}
-                    healthLoading={voiceSession.healthLoading}
-                    hotkeyLabel={voiceSession.hotkeyLabel}
-                    onGoToSettings={() => setActiveTab('settings')}
-                    onManualStart={() => void voiceSession.manualStart()}
-                    onManualStop={() => void voiceSession.manualStop()}
-                    onRetryHoldHook={() => void voiceSession.retryHoldHook()}
-                    onRunHealthCheck={() => void voiceSession.runHealthCheck()}
-                    onToggleAutoPaste={() => void appSettings.toggleAutoPaste()}
-                    partial={voiceSession.partial}
-                    status={voiceSession.status}
-                  />
-                </TabsContent>
-
-                <TabsContent
-                  value="dictionary"
-                  className="mt-0 animate-in fade-in slide-in-from-bottom-4 duration-500 outline-none"
-                >
-                  {activeTab === 'dictionary' ? (
-                    <Suspense fallback={tabFallback('Carregando vocabulário...')}>
-                      <DictionaryTab
-                        canonicalTerms={dictionary.canonicalTerms}
-                        dictionary={dictionary.dictionary}
-                        dictionaryAvailable={dictionary.dictionaryAvailable}
-                        dictionaryBusy={dictionary.dictionaryBusy}
-                        hasDesktopApi={hasDesktopApi}
-                        newCanonicalFrom={dictionary.newCanonicalFrom}
-                        newCanonicalTo={dictionary.newCanonicalTo}
-                        newHintPt={dictionary.newHintPt}
-                        newTerm={dictionary.newTerm}
-                        onAddCanonicalTerm={() => void dictionary.addCanonicalTerm()}
-                        onAddDictionaryTerm={() => void dictionary.addDictionaryTerm()}
-                        onDictionaryReload={() => void dictionary.loadDictionaryData()}
-                        onRemoveCanonicalTerm={(index) =>
-                          void dictionary.removeCanonicalTerm(index)
-                        }
-                        onRemoveDictionaryTerm={(id) => void dictionary.removeDictionaryTerm(id)}
-                        onSetNewCanonicalFrom={dictionary.setNewCanonicalFrom}
-                        onSetNewCanonicalTo={dictionary.setNewCanonicalTo}
-                        onSetNewHintPt={dictionary.setNewHintPt}
-                        onSetNewTerm={dictionary.setNewTerm}
-                        onToggleCanonicalTerm={(index, enabled) =>
-                          void dictionary.toggleCanonicalTerm(index, enabled)
-                        }
-                        onToggleTermEnabled={(item, enabled) =>
-                          void dictionary.toggleTermEnabled(item, enabled)
-                        }
-                      />
-                    </Suspense>
-                  ) : null}
-                </TabsContent>
-
-                <TabsContent
-                  value="history"
-                  className="mt-0 animate-in fade-in slide-in-from-bottom-4 duration-500 outline-none"
-                >
-                  {activeTab === 'history' ? (
-                    <Suspense fallback={tabFallback('Carregando histórico...')}>
-                      <HistoryTab
-                        hasDesktopApi={hasDesktopApi}
-                        historyBusy={history.historyBusy}
-                        historyEntries={history.historyEntries}
-                        historyLoading={history.historyLoading}
-                        historyQuery={history.historyQuery}
-                        onClearHistory={() => void history.clearHistory()}
-                        onCopyHistoryEntry={(entry) => void history.copyHistoryEntry(entry)}
-                        onRefreshHistory={() => void history.refreshHistory()}
-                        onRemoveHistoryEntry={(id) => void history.removeHistoryEntry(id)}
-                        onSetHistoryQuery={history.setHistoryQuery}
-                      />
-                    </Suspense>
-                  ) : null}
-                </TabsContent>
-
-                <TabsContent
-                  value="settings"
-                  className="mt-0 animate-in fade-in slide-in-from-bottom-4 duration-500 outline-none"
-                >
-                  {activeTab === 'settings' ? (
-                    <Suspense fallback={tabFallback('Carregando configurações...')}>
-                      <SettingsTab
-                        extraPhrasesText={appSettings.extraPhrasesText}
-                        formatCommandsEnabled={appSettings.formatCommandsEnabled}
-                        hasDesktopApi={hasDesktopApi}
-                        historyEnabled={appSettings.historyEnabled}
-                        historyRetentionDays={appSettings.historyRetentionDays}
-                        historyStorageMode={appSettings.historyStorageMode}
-                        languageMode={appSettings.languageMode}
-                        latencyProfile={appSettings.latencyProfile}
-                        micDeviceId={voiceSession.micDeviceId}
-                        micDevices={voiceSession.micDevices}
-                        micInputGain={voiceSession.micInputGain}
-                        onChangeLatencyProfile={appSettings.setLatencyProfile}
-                        onChangeToneMode={appSettings.setToneMode}
-                        onSaveComprehensionSettings={() => void appSettings.saveSettings()}
-                        onSetExtraPhrasesText={appSettings.setExtraPhrasesText}
-                        onSetFormatCommandsEnabled={appSettings.setFormatCommandsEnabled}
-                        onSetHistoryEnabled={appSettings.setHistoryEnabled}
-                        onSetHistoryRetentionDays={(value) =>
-                          appSettings.setHistoryRetentionDays(clampHistoryRetentionDays(value))
-                        }
-                        onSetHistoryStorageMode={appSettings.setHistoryStorageMode}
-                        onSetInputGain={voiceSession.setMicInputGain}
-                        onSetLanguageMode={appSettings.setLanguageMode}
-                        onSetMicDeviceId={voiceSession.setMicDeviceId}
-                        onSetPrivacyMode={appSettings.setPrivacyMode}
-                        privacyMode={appSettings.privacyMode}
-                        settingsSaving={appSettings.settingsSaving}
-                        toneMode={appSettings.toneMode}
-                      />
-                    </Suspense>
-                  ) : null}
-                </TabsContent>
-              </main>
-            </div>
-          </div>
-        </Tabs>
+          <main className="min-h-0 overflow-hidden p-8">
+            <IndexTabPanels
+              activeTab={activeTab}
+              hasDesktopApi={hasDesktopApi}
+              onSetActiveTab={setActiveTab}
+              onSetTheme={setTheme}
+              theme={theme}
+              vm={vm}
+            />
+          </main>
+        </div>
       </div>
     </div>
   );

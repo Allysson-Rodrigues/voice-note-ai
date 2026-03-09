@@ -6,6 +6,12 @@ import { History } from 'lucide-react';
 import { memo } from 'react';
 import { formatHistoryDate } from './utils';
 
+function confidenceBadgeClass(bucket?: HistoryEntry['confidenceBucket']) {
+  if (bucket === 'high') return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
+  if (bucket === 'medium') return 'bg-amber-500/10 text-amber-700 dark:text-amber-400';
+  return 'bg-rose-500/10 text-rose-700 dark:text-rose-400';
+}
+
 type HistoryTabProps = {
   hasDesktopApi: boolean;
   historyBusy: boolean;
@@ -101,6 +107,18 @@ const HistoryTab = memo(function HistoryTab({
                       <span>
                         {Math.max(1, Math.round(entry.sessionDurationMs / 1000))}s de captura
                       </span>
+                      {entry.intent ? (
+                        <span className="rounded-full border border-border/40 bg-background px-2.5 py-1">
+                          {entry.intent}
+                        </span>
+                      ) : null}
+                      {entry.confidenceBucket ? (
+                        <span
+                          className={`rounded-full px-2.5 py-1 ${confidenceBadgeClass(entry.confidenceBucket)}`}
+                        >
+                          confiança {entry.confidenceBucket}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="text-sm leading-relaxed text-foreground whitespace-pre-wrap font-medium">
                       {entry.text}
@@ -125,6 +143,28 @@ const HistoryTab = memo(function HistoryTab({
                           Retentativas: {entry.retryCount}
                         </span>
                       )}
+                      {entry.rewriteApplied ? (
+                        <span>
+                          Rewrite:{' '}
+                          <span className="font-mono text-muted-foreground">
+                            {entry.rewriteRisk ?? 'low'}
+                          </span>
+                        </span>
+                      ) : null}
+                      {entry.appKey ? (
+                        <span>
+                          App:{' '}
+                          <span className="font-mono text-muted-foreground">{entry.appKey}</span>
+                        </span>
+                      ) : null}
+                      {entry.injectionMethod ? (
+                        <span>
+                          Método:{' '}
+                          <span className="font-mono text-muted-foreground">
+                            {entry.injectionMethod}
+                          </span>
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center justify-end gap-2 opacity-70 transition-opacity group-hover:opacity-100 sm:flex-col sm:items-end">

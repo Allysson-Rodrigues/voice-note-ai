@@ -1,5 +1,6 @@
 import { globalShortcut } from 'electron';
 import { randomUUID } from 'node:crypto';
+import { hotkeyLabelFromAccelerator, parseHoldHotkeyChord } from '../hotkey-config.js';
 
 type HotkeyMode = 'hold' | 'toggle-primary' | 'toggle-fallback' | 'unavailable';
 type RuntimeInfo = {
@@ -18,6 +19,8 @@ type HudState = {
 type UiohookKeyEvent = {
   keycode?: number;
   ctrlKey?: boolean;
+  altKey?: boolean;
+  shiftKey?: boolean;
   metaKey?: boolean;
 };
 
@@ -45,8 +48,8 @@ function resolveUiohookInstance(mod: UiohookImport): UiohookInstance | null {
 }
 
 type HotkeyServiceOptions = {
-  primaryHotkey: string;
-  fallbackHotkey: string;
+  getPrimaryHotkey: () => string;
+  getFallbackHotkey: () => string;
   holdToTalkEnabled: boolean;
   holdHookRecoveryRetryMs: number;
   getRuntimeInfo: () => RuntimeInfo;
@@ -66,37 +69,23 @@ type HotkeyServiceOptions = {
   isQuitting: () => boolean;
 };
 
-function acceleratorToLabel(accelerator: string) {
-  return accelerator
-    .split('+')
-    .map((token) => token.trim())
-    .filter(Boolean)
-    .map((token) => {
-      const key = token.toLowerCase();
-      if (key === 'commandorcontrol' || key === 'ctrl' || key === 'control') return 'Ctrl';
-      if (key === 'super' || key === 'meta' || key === 'command') return 'Win';
-      if (key === 'space') return 'Space';
-      return token.length <= 1 ? token.toUpperCase() : token;
-    })
-    .join('+');
-}
-
-function parseHoldKeycodes(): number[] | null {
-  const raw = process.env.VOICE_HOLD_KEYCODES;
-  if (!raw) return null;
-  const parts = raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => Number(s));
-
-  if (parts.length === 0 || parts.some((n) => !Number.isFinite(n))) return null;
-  return parts;
-}
-
 export function createHotkeyService(options: HotkeyServiceOptions) {
   let stopHoldHook: null | (() => void) = null;
   let holdHookRecoveryTimer: NodeJS.Timeout | null = null;
+
+  function resolveHotkeys(overrides?: { primaryHotkey?: string; fallbackHotkey?: string }) {
+    return {
+      primaryHotkey: overrides?.primaryHotkey ?? options.getPrimaryHotkey(),
+      fallbackHotkey: overrides?.fallbackHotkey ?? options.getFallbackHotkey(),
+    };
+  }
+
+  function reportHotkeyFailure(message: string) {
+    options.setRuntimeBlocked(message);
+    options.emitAppError(message);
+    options.setHudState({ state: 'error', message });
+    return { ok: false as const, message };
+  }
 
   function stopHoldHookRecovery() {
     if (!holdHookRecoveryTimer) return;
@@ -159,40 +148,39 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
     options.setHudState({ state: 'listening' });
   }
 
-  function registerToggleHotkey() {
+  function registerToggleHotkey(hotkeys = resolveHotkeys()) {
     globalShortcut.unregisterAll();
+    const { primaryHotkey, fallbackHotkey } = hotkeys;
 
-    const primaryOk = globalShortcut.register(options.primaryHotkey, startSessionFromHotkey);
+    const primaryOk = globalShortcut.register(primaryHotkey, startSessionFromHotkey);
     if (primaryOk) {
       options.updateRuntimeInfo({
         ...options.getRuntimeInfo(),
-        hotkeyLabel: acceleratorToLabel(options.primaryHotkey),
+        hotkeyLabel: hotkeyLabelFromAccelerator(primaryHotkey),
         hotkeyMode: 'toggle-primary',
         holdToTalkActive: false,
         holdRequired: false,
       });
-      return;
+      return { ok: true as const };
     }
 
-    const fallbackOk = globalShortcut.register(options.fallbackHotkey, startSessionFromHotkey);
+    const fallbackOk = globalShortcut.register(fallbackHotkey, startSessionFromHotkey);
     if (fallbackOk) {
       options.updateRuntimeInfo({
         ...options.getRuntimeInfo(),
-        hotkeyLabel: acceleratorToLabel(options.fallbackHotkey),
+        hotkeyLabel: hotkeyLabelFromAccelerator(fallbackHotkey),
         hotkeyMode: 'toggle-fallback',
         holdToTalkActive: false,
         holdRequired: false,
       });
-      return;
+      return { ok: true as const };
     }
 
-    const errorMessage = `Nao foi possivel registrar hotkey global (${options.primaryHotkey} ou ${options.fallbackHotkey}).`;
-    options.setRuntimeBlocked(errorMessage);
-    options.emitAppError(errorMessage);
-    options.setHudState({ state: 'error', message: errorMessage });
+    const errorMessage = `Nao foi possivel registrar hotkey global (${primaryHotkey} ou ${fallbackHotkey}).`;
+    return reportHotkeyFailure(errorMessage);
   }
 
-  async function tryStartHoldToTalkHook() {
+  async function tryStartHoldToTalkHook(primaryHotkey = options.getPrimaryHotkey()) {
     if (!options.holdToTalkEnabled) return null;
     if (process.platform !== 'win32') return null;
 
@@ -206,14 +194,22 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
     const uIOhook = resolveUiohookInstance(uiohookMod);
     if (!uIOhook?.on || !uIOhook?.start) return null;
 
-    const required = parseHoldKeycodes();
+    const chord = parseHoldHotkeyChord(primaryHotkey);
     const pressed = new Set<number>();
     let chordActive = false;
     let ctrlDown = false;
+    let altDown = false;
+    let shiftDown = false;
     let metaDown = false;
 
     function recomputeChordActive() {
-      const next = required ? required.every((k) => pressed.has(k)) : ctrlDown && metaDown;
+      const modifiersActive =
+        (!chord.ctrl || ctrlDown) &&
+        (!chord.alt || altDown) &&
+        (!chord.shift || shiftDown) &&
+        (!chord.meta || metaDown);
+      const keysActive = chord.keys.every((keycode) => pressed.has(keycode));
+      const next = modifiersActive && keysActive;
       if (next === chordActive) return;
       chordActive = next;
 
@@ -249,6 +245,8 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
       const keyEvent = event as UiohookKeyEvent;
       if (typeof keyEvent.keycode === 'number') pressed.add(keyEvent.keycode);
       ctrlDown = Boolean(keyEvent.ctrlKey) || pressed.has(29) || pressed.has(3613);
+      altDown = Boolean(keyEvent.altKey) || pressed.has(56) || pressed.has(3640);
+      shiftDown = Boolean(keyEvent.shiftKey) || pressed.has(42) || pressed.has(54);
       metaDown = Boolean(keyEvent.metaKey) || pressed.has(3675) || pressed.has(3676);
       recomputeChordActive();
     };
@@ -257,6 +255,8 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
       const keyEvent = event as UiohookKeyEvent;
       if (typeof keyEvent.keycode === 'number') pressed.delete(keyEvent.keycode);
       ctrlDown = Boolean(keyEvent.ctrlKey);
+      altDown = Boolean(keyEvent.altKey);
+      shiftDown = Boolean(keyEvent.shiftKey);
       metaDown = Boolean(keyEvent.metaKey);
       recomputeChordActive();
     };
@@ -280,7 +280,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
 
     options.updateRuntimeInfo({
       ...options.getRuntimeInfo(),
-      hotkeyLabel: acceleratorToLabel(options.primaryHotkey),
+      hotkeyLabel: hotkeyLabelFromAccelerator(chord.accelerator),
       hotkeyMode: 'hold',
       holdToTalkActive: true,
       holdRequired: true,
@@ -307,7 +307,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
       return { ok: false, message: 'Recuperacao de hook e suportada apenas no Windows.' };
     }
     if (!options.holdToTalkEnabled) {
-      return { ok: false, message: 'VOICE_HOLD_TO_TALK esta desativado.' };
+      return { ok: false, message: 'O modo segurar para falar esta desativado.' };
     }
     if (stopHoldHook) {
       options.refreshCaptureBlockedReason();
@@ -350,6 +350,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
 
   function stop() {
     stopHoldHookRecovery();
+    globalShortcut.unregisterAll();
     try {
       stopHoldHook?.();
     } catch {
@@ -358,10 +359,62 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
     stopHoldHook = null;
   }
 
+  function validateHotkeyConfiguration(hotkeys = resolveHotkeys()) {
+    if (process.platform === 'win32' && options.holdToTalkEnabled) {
+      try {
+        parseHoldHotkeyChord(hotkeys.primaryHotkey);
+      } catch (error) {
+        return {
+          ok: false as const,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }
+
+    return { ok: true as const };
+  }
+
+  async function reloadHotkeys(overrides?: { primaryHotkey?: string; fallbackHotkey?: string }) {
+    const hotkeys = resolveHotkeys(overrides);
+    const validation = validateHotkeyConfiguration(hotkeys);
+    if (!validation.ok) {
+      return reportHotkeyFailure(validation.message);
+    }
+
+    stop();
+
+    if (process.platform === 'win32') {
+      if (!options.holdToTalkEnabled) {
+        const message = 'PTT indisponivel: o modo segurar para falar esta desativado.';
+        return reportHotkeyFailure(message);
+      }
+
+      try {
+        const stopper = await tryStartHoldToTalkHook(hotkeys.primaryHotkey);
+        setStopHoldHook(stopper);
+        if (stopper) {
+          options.setHudState({ state: 'idle' });
+          return { ok: true as const };
+        }
+      } catch {
+        setStopHoldHook(null);
+      }
+
+      const message = 'PTT indisponivel: hook global nao carregou (uiohook-napi).';
+      reportHotkeyFailure(message);
+      scheduleHoldHookRecovery();
+      return { ok: false as const, message };
+    }
+
+    return registerToggleHotkey(hotkeys);
+  }
+
   return {
     registerToggleHotkey,
     tryStartHoldToTalkHook,
+    validateHotkeyConfiguration,
     retryHoldHook,
+    reloadHotkeys,
     scheduleHoldHookRecovery,
     stopHoldHookRecovery,
     setStopHoldHook,

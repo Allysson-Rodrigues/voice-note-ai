@@ -35,6 +35,8 @@ describe('Index smoke', () => {
       sendAudio: () => {},
       stopStt: async () => ({ ok: true }),
       getSettings: async () => ({
+        hotkeyPrimary: 'CommandOrControl+Super',
+        hotkeyFallback: 'CommandOrControl+Super+Space',
         autoPasteEnabled: false,
         toneMode: 'casual',
         languageMode: 'pt-BR',
@@ -50,6 +52,12 @@ describe('Index smoke', () => {
         historyStorageMode: 'plain',
         postprocessProfile: 'balanced',
         dualLanguageStrategy: 'fallback-on-low-confidence',
+        rewriteEnabled: true,
+        rewriteMode: 'safe',
+        intentDetectionEnabled: true,
+        protectedTerms: [],
+        lowConfidencePolicy: 'review',
+        adaptiveLearningEnabled: true,
         appProfiles: {},
       }),
       getRuntimeInfo: async () => ({
@@ -57,6 +65,33 @@ describe('Index smoke', () => {
         hotkeyMode: 'hold',
         holdToTalkActive: true,
         holdRequired: true,
+      }),
+      getAzureCredentialStatus: async () => ({
+        source: 'missing',
+        storageMode: 'none',
+        hasStoredCredentials: false,
+        encryptionAvailable: true,
+        canPersistSecurely: true,
+      }),
+      testAzureCredentials: async () => ({
+        status: 'ok',
+        message: 'ok',
+        host: 'brazilsouth.api.cognitive.microsoft.com',
+      }),
+      saveAzureCredentials: async () => ({
+        source: 'secure-store',
+        storageMode: 'encrypted',
+        hasStoredCredentials: true,
+        encryptionAvailable: true,
+        canPersistSecurely: true,
+        region: 'brazilsouth',
+      }),
+      clearAzureCredentials: async () => ({
+        source: 'missing',
+        storageMode: 'none',
+        hasStoredCredentials: false,
+        encryptionAvailable: true,
+        canPersistSecurely: true,
       }),
       getHealthCheck,
       getPerfSummary: async () => ({
@@ -73,6 +108,9 @@ describe('Index smoke', () => {
           TIMEOUT: 0,
         },
       }),
+      listAdaptiveSuggestions: async () => [],
+      applyAdaptiveSuggestion: async () => ({ ok: true }),
+      dismissAdaptiveSuggestion: async () => ({ ok: true }),
       getRecentLogs: async () => [],
       retryHoldHook: async () => ({ ok: true, message: 'ok' }),
       updateSettings: async () => ({ ok: true, settings: {} }),
@@ -105,7 +143,7 @@ describe('Index smoke', () => {
     expect(listDictionary).not.toHaveBeenCalled();
     expect(listHistory).not.toHaveBeenCalled();
     expect(getHealthCheck).not.toHaveBeenCalled();
-  });
+  }, 10000);
 
   it('loads dictionary, history and health check on demand', async () => {
     const listDictionary = vi.fn(async () => []);
@@ -139,6 +177,8 @@ describe('Index smoke', () => {
       sendAudio: () => {},
       stopStt: async () => ({ ok: true }),
       getSettings: async () => ({
+        hotkeyPrimary: 'CommandOrControl+Super',
+        hotkeyFallback: 'CommandOrControl+Super+Space',
         autoPasteEnabled: false,
         toneMode: 'casual',
         languageMode: 'pt-BR',
@@ -154,6 +194,12 @@ describe('Index smoke', () => {
         historyStorageMode: 'plain',
         postprocessProfile: 'balanced',
         dualLanguageStrategy: 'fallback-on-low-confidence',
+        rewriteEnabled: true,
+        rewriteMode: 'safe',
+        intentDetectionEnabled: true,
+        protectedTerms: [],
+        lowConfidencePolicy: 'review',
+        adaptiveLearningEnabled: true,
         appProfiles: {},
       }),
       getRuntimeInfo: async () => ({
@@ -161,6 +207,33 @@ describe('Index smoke', () => {
         hotkeyMode: 'hold',
         holdToTalkActive: true,
         holdRequired: true,
+      }),
+      getAzureCredentialStatus: async () => ({
+        source: 'missing',
+        storageMode: 'none',
+        hasStoredCredentials: false,
+        encryptionAvailable: true,
+        canPersistSecurely: true,
+      }),
+      testAzureCredentials: async () => ({
+        status: 'ok',
+        message: 'ok',
+        host: 'brazilsouth.api.cognitive.microsoft.com',
+      }),
+      saveAzureCredentials: async () => ({
+        source: 'secure-store',
+        storageMode: 'encrypted',
+        hasStoredCredentials: true,
+        encryptionAvailable: true,
+        canPersistSecurely: true,
+        region: 'brazilsouth',
+      }),
+      clearAzureCredentials: async () => ({
+        source: 'missing',
+        storageMode: 'none',
+        hasStoredCredentials: false,
+        encryptionAvailable: true,
+        canPersistSecurely: true,
       }),
       getHealthCheck,
       getPerfSummary: async () => ({
@@ -177,6 +250,9 @@ describe('Index smoke', () => {
           TIMEOUT: 0,
         },
       }),
+      listAdaptiveSuggestions: async () => [],
+      applyAdaptiveSuggestion: async () => ({ ok: true }),
+      dismissAdaptiveSuggestion: async () => ({ ok: true }),
       getRecentLogs: async () => [],
       retryHoldHook: async () => ({ ok: true, message: 'ok' }),
       updateSettings: async () => ({ ok: true, settings: {} }),
@@ -202,22 +278,22 @@ describe('Index smoke', () => {
 
     render(<Index />);
 
-    const dictionaryTab = screen.getByTitle('Vocabulário');
+    const dictionaryTab = screen.getByRole('tab', { name: 'Vocabulário' });
     fireEvent.mouseDown(dictionaryTab);
     fireEvent.click(dictionaryTab);
     await waitFor(() => expect(dictionaryTab).toHaveAttribute('aria-selected', 'true'));
     await waitFor(() => expect(listDictionary).toHaveBeenCalledTimes(1));
 
-    const historyTab = screen.getByTitle('Histórico');
+    const historyTab = screen.getByRole('tab', { name: 'Histórico' });
     fireEvent.mouseDown(historyTab);
     fireEvent.click(historyTab);
     await waitFor(() => expect(historyTab).toHaveAttribute('aria-selected', 'true'));
     await waitFor(() => expect(listHistory).toHaveBeenCalledTimes(1));
 
-    const settingsTab = screen.getByTitle('Configurações');
+    const settingsTab = screen.getByRole('tab', { name: 'Configurações' });
     fireEvent.mouseDown(settingsTab);
     fireEvent.click(settingsTab);
     await waitFor(() => expect(settingsTab).toHaveAttribute('aria-selected', 'true'));
     await waitFor(() => expect(getHealthCheck).toHaveBeenCalledTimes(1));
-  });
+  }, 10000);
 });

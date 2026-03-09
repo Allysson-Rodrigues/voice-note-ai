@@ -6,6 +6,7 @@ import { Activity, Mic, Settings, Wand2 } from 'lucide-react';
 import { memo } from 'react';
 import type { Status, UiHealthItem } from './types';
 import { healthDotClass } from './utils';
+import type { RuntimeInfo } from '@/electron';
 
 const HEALTH_LABELS: Record<UiHealthItem['id'], string> = {
   stt: 'Transcrição',
@@ -37,10 +38,25 @@ const STATUS_COPY: Record<Status, { badge: string; helper: string }> = {
   },
 };
 
+const STATUS_PANEL_TONE: Record<Status, string> = {
+  idle: 'border-emerald-400/20 bg-emerald-400/10',
+  listening: 'border-sky-400/20 bg-sky-400/10',
+  finalizing: 'border-amber-300/20 bg-amber-300/10',
+  error: 'border-rose-400/20 bg-rose-400/10',
+};
+
+const STATUS_BADGE_COPY: Record<Status, string> = {
+  idle: 'Em espera',
+  listening: 'Ouvindo',
+  finalizing: 'Revisando',
+  error: 'Com erro',
+};
+
 type CaptureTabProps = {
   autoPasteEnabled: boolean;
   canControl: boolean;
   canStop: boolean;
+  runtimeInfo: RuntimeInfo;
   error: string | null;
   finalText: string;
   hasDesktopApi: boolean;
@@ -61,6 +77,7 @@ const CaptureTab = memo(function CaptureTab({
   autoPasteEnabled,
   canControl,
   canStop,
+  runtimeInfo,
   error,
   finalText,
   hasDesktopApi,
@@ -78,59 +95,79 @@ const CaptureTab = memo(function CaptureTab({
 }: CaptureTabProps) {
   const statusCopy = STATUS_COPY[status];
   const finalPreview = finalText || 'O texto revisado aparecerá aqui assim que a captura terminar.';
+  const hasBlockingIssue = Boolean(error) && !canControl;
+  const injectionHealth = healthItems.find((item) => item.id === 'injection');
+  const captureHeadline = hasBlockingIssue
+    ? 'Antes de ditar, ajuste o ambiente do desktop'
+    : 'Dite em qualquer aplicativo, com revisão rápida';
+  const captureSubcopy = hasBlockingIssue
+    ? 'O fluxo de captura está disponível, mas ainda falta liberar o runtime para ditado global ou inserção confiável.'
+    : 'Segure o atalho, fale com naturalidade e solte. O Vox Type acompanha a captura, revisa o texto e tenta inserir no aplicativo em foco sem tirar você do fluxo.';
 
   return (
     <div className="space-y-8">
-      <div className="relative overflow-hidden rounded-[28px] border border-black/10 bg-[linear-gradient(135deg,#17181f_0%,#111319_48%,#1e2128_100%)] px-8 py-8 shadow-[0_26px_70px_rgba(0,0,0,0.22)] dark:border-white/10">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.14),transparent_32%),radial-gradient(circle_at_80%_20%,rgba(56,189,248,0.16),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(245,158,11,0.14),transparent_24%)]" />
+      <div className="glass relative overflow-hidden rounded-[32px] px-8 py-8 shadow-[0_26px_70px_rgba(0,0,0,0.12)]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.72),transparent_30%),radial-gradient(circle_at_78%_18%,rgba(251,146,60,0.18),transparent_25%),radial-gradient(circle_at_bottom_right,rgba(236,72,153,0.14),transparent_24%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_32%),radial-gradient(circle_at_80%_20%,rgba(56,189,248,0.16),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(245,158,11,0.14),transparent_24%)]" />
         <div className="pointer-events-none absolute right-4 top-2 opacity-20">
           <HudIndicator state={status} />
         </div>
 
         <div className="relative z-10 grid gap-8 xl:grid-cols-[minmax(0,1.7fr)_minmax(300px,0.9fr)]">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/8 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/72">
-              <span className="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_0_4px_rgba(125,211,252,0.14)]" />
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
+              <span className="h-2 w-2 rounded-full bg-primary shadow-[0_0_0_4px_hsl(var(--primary)/0.12)]" />
               Fluxo principal de ditado
             </div>
 
-            <h2 className="mt-5 text-3xl font-semibold tracking-tight text-white sm:text-4xl">
-              Dite em qualquer aplicativo, <span className="text-white/55">com revisão rápida</span>
+            <h2 className="mt-5 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+              {captureHeadline.includes(',') ? (
+                <>
+                  {captureHeadline.split(',')[0]},{' '}
+                  <span className="text-foreground/55">
+                    {captureHeadline.split(',').slice(1).join(',').trim()}
+                  </span>
+                </>
+              ) : (
+                captureHeadline
+              )}
             </h2>
-            <p className="mt-4 max-w-2xl text-base leading-relaxed text-white/68">
-              Segure{' '}
-              <kbd className="mx-1 rounded-md border border-white/20 bg-white/10 px-2 py-0.5 font-mono text-sm text-white/90 shadow-sm">
+            <p className="mt-4 max-w-2xl text-base leading-relaxed text-muted-foreground">
+              {captureSubcopy} <span className="inline-flex items-center">Segure </span>
+              <kbd className="mx-1 rounded-md border border-border/70 bg-background/80 px-2 py-0.5 font-mono text-sm text-foreground shadow-sm">
                 {hotkeyLabel}
               </kbd>
-              , fale com naturalidade e solte. O Vox Type acompanha a captura, revisa o texto e
-              tenta inserir no aplicativo em foco sem tirar você do fluxo.
+              .
             </p>
 
-            <div className="mt-6 flex flex-wrap gap-3 text-sm text-white/75">
-              <div className="rounded-2xl border border-white/10 bg-white/6 px-4 py-3">
-                <span className="block text-[11px] uppercase tracking-[0.2em] text-white/42">
+            <div className="mt-6 flex flex-wrap gap-3 text-sm text-foreground/80">
+              <div className="card-warm rounded-2xl px-4 py-3">
+                <span className="block text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
                   1. Capturar
                 </span>
                 <span className="mt-1 block">Fale como você falaria ao vivo.</span>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/6 px-4 py-3">
-                <span className="block text-[11px] uppercase tracking-[0.2em] text-white/42">
+              <div className="card-warm rounded-2xl px-4 py-3">
+                <span className="block text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
                   2. Revisar
                 </span>
                 <span className="mt-1 block">O app organiza e limpa o texto final.</span>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-white/6 px-4 py-3">
-                <span className="block text-[11px] uppercase tracking-[0.2em] text-white/42">
+              <div className="card-warm rounded-2xl px-4 py-3">
+                <span className="block text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
                   3. Inserir
                 </span>
-                <span className="mt-1 block">Use auto colagem ou controle manual.</span>
+                <span className="mt-1 block">
+                  {injectionHealth?.status === 'warn'
+                    ? 'A inserção automática depende do app em foco.'
+                    : 'Use auto colagem ou controle manual.'}
+                </span>
               </div>
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-4">
               <Button
                 size="lg"
-                className="h-12 rounded-xl bg-white px-8 font-medium text-black shadow-[0_0_20px_rgba(255,255,255,0.1)] transition-all hover:scale-105 hover:bg-white/90 hover:shadow-[0_0_25px_rgba(255,255,255,0.2)] disabled:opacity-50 disabled:hover:scale-100"
+                className="glow-primary h-12 rounded-xl bg-primary px-8 font-medium text-primary-foreground transition-all hover:scale-[1.02] hover:bg-primary/90 disabled:opacity-50 disabled:hover:scale-100"
                 onClick={onManualStart}
                 disabled={!canControl || status !== 'idle'}
               >
@@ -140,54 +177,82 @@ const CaptureTab = memo(function CaptureTab({
               <Button
                 size="lg"
                 variant="outline"
-                className="h-12 rounded-xl border-white/10 bg-white/5 px-6 text-white hover:bg-white/10 hover:text-white"
+                className="h-12 rounded-xl border-border/70 bg-white/88 px-6 text-slate-900 shadow-sm hover:bg-white dark:bg-background/70 dark:text-foreground dark:hover:bg-background"
                 onClick={onGoToSettings}
               >
                 <Settings className="mr-2 h-5 w-5 opacity-70" />
                 Ajustar preferências
               </Button>
             </div>
+
+            {hasBlockingIssue ? (
+              <div className="mt-5 max-w-2xl rounded-2xl border border-amber-400/20 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+                <div className="font-medium text-amber-50">Configuração necessária</div>
+                <div className="mt-1 text-amber-100/80">{error}</div>
+              </div>
+            ) : null}
           </div>
 
-          <div className="rounded-[24px] border border-white/10 bg-black/16 p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm">
+          <div className={`card-warm rounded-[24px] p-5 ${STATUS_PANEL_TONE[status]}`}>
             <div className="flex items-center justify-between gap-4">
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/46">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                   Status agora
                 </div>
                 <div className="mt-2 text-lg font-semibold">{statusCopy.badge}</div>
               </div>
-              <div className="rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-medium text-white/80">
-                {status === 'idle'
-                  ? 'Em espera'
-                  : status === 'listening'
-                    ? 'Ouvindo'
-                    : status === 'finalizing'
-                      ? 'Revisando'
-                      : 'Com erro'}
+              <div className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-xs font-medium text-foreground/80">
+                {STATUS_BADGE_COPY[status]}
               </div>
             </div>
 
-            <p className="mt-3 text-sm leading-relaxed text-white/68">{statusCopy.helper}</p>
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              {statusCopy.helper}
+            </p>
 
             <div className="mt-5 grid gap-3">
-              <div className="rounded-2xl border border-white/8 bg-white/6 px-4 py-3">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/45">
+              <div className="rounded-2xl border border-border/60 bg-background/70 px-4 py-3">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                   <Activity className="h-3.5 w-3.5" />
                   Atalho rápido
                 </div>
-                <div className="mt-2 text-sm text-white/82">
-                  Segure <span className="font-mono text-white">{hotkeyLabel}</span> para gravar sem
-                  sair do app em foco.
+                <div className="mt-2 text-sm text-foreground/82">
+                  {runtimeInfo.holdToTalkActive ? (
+                    <>
+                      Segure <span className="font-mono text-foreground">{hotkeyLabel}</span> para
+                      gravar sem sair do app em foco.
+                    </>
+                  ) : (
+                    'O ditado global está indisponível neste momento. Use o controle manual ou recupere o atalho.'
+                  )}
                 </div>
               </div>
-              <div className="rounded-2xl border border-white/8 bg-white/6 px-4 py-3">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/45">
+              <div className="rounded-2xl border border-border/60 bg-background/70 px-4 py-3">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                   <Wand2 className="h-3.5 w-3.5" />
                   Resultado esperado
                 </div>
-                <div className="mt-2 text-sm text-white/82">
-                  Seu texto final chega revisado e pronto para uso no mesmo fluxo.
+                <div className="mt-2 text-sm text-foreground/82">
+                  {hasBlockingIssue
+                    ? 'Resolva o bloqueio atual para liberar captura e inserção.'
+                    : 'Seu texto final chega revisado e pronto para uso no mesmo fluxo.'}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-border/60 bg-background/70 px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                      Auto colagem
+                    </div>
+                    <div className="mt-2 text-sm text-foreground/82">
+                      {autoPasteEnabled
+                        ? 'Ao finalizar, o app tenta inserir o texto automaticamente.'
+                        : 'O texto final fica pronto para revisão e uso manual.'}
+                    </div>
+                  </div>
+                  <div className="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-xs font-medium text-foreground/80">
+                    {autoPasteEnabled ? 'Ligada' : 'Desligada'}
+                  </div>
                 </div>
               </div>
             </div>
@@ -250,13 +315,16 @@ const CaptureTab = memo(function CaptureTab({
               <CardTitle className="text-sm font-medium text-foreground">
                 Diagnóstico rápido
               </CardTitle>
-              <button
+              <Button
                 type="button"
-                className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground cursor-pointer hover:text-foreground transition-colors"
+                variant="ghost"
+                size="sm"
+                className="h-8 rounded-lg px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground"
                 onClick={onRunHealthCheck}
+                disabled={healthLoading}
               >
-                Atualizar diagnóstico
-              </button>
+                {healthLoading ? 'Atualizando...' : 'Atualizar diagnóstico'}
+              </Button>
             </div>
           </CardHeader>
           <CardContent>

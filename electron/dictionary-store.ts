@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import {
+  quarantineFile,
+  readTextFilePair,
+  unwrapStoreEnvelope,
+  wrapStoreEnvelope,
+  writeTextFileAtomic,
+} from './store-utils.js';
 
 export type DictionaryTerm = {
   id: string;
@@ -201,25 +206,44 @@ export class DictionaryStore {
   }
 
   private async loadRaw(): Promise<DictionaryTerm[]> {
-    try {
-      const content = await readFile(this.filePath, 'utf8');
-      const parsed = parseDictionary(JSON.parse(content));
-      // Self-heal malformed file on read.
-      await this.persist(parsed);
-      return parsed;
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOENT') return [];
-      if (error instanceof SyntaxError) {
-        await this.persist([]);
-        return [];
+    const pair = await readTextFilePair(this.filePath);
+    const primary = this.tryParse(pair.primary);
+    if (primary) {
+      if (primary.needsMigration) {
+        await this.persist(primary.entries);
       }
-      throw error;
+      return primary.entries;
     }
+
+    const backup = this.tryParse(pair.backup);
+    if (backup) {
+      await this.persist(backup.entries);
+      return backup.entries;
+    }
+
+    if (pair.primary != null) {
+      await quarantineFile(this.filePath, 'corrupt');
+    }
+
+    return [];
   }
 
   private async persist(entries: DictionaryTerm[]): Promise<void> {
-    await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(entries, null, 2), 'utf8');
+    await writeTextFileAtomic(this.filePath, JSON.stringify(wrapStoreEnvelope(entries), null, 2));
+  }
+
+  private tryParse(content: string | null) {
+    if (content == null) return null;
+
+    try {
+      const raw = JSON.parse(content);
+      const envelope = unwrapStoreEnvelope<unknown>(raw);
+      return {
+        entries: parseDictionary(envelope.data),
+        needsMigration: envelope.version < 1,
+      };
+    } catch {
+      return null;
+    }
   }
 }

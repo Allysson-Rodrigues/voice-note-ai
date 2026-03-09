@@ -38,6 +38,8 @@ describe('useAppSettings', () => {
     const onHealthCheck = vi.fn(async () => undefined);
     const onHistoryRefresh = vi.fn(async () => undefined);
     const getSettings = vi.fn(async () => ({
+      hotkeyPrimary: 'CommandOrControl+Super',
+      hotkeyFallback: 'CommandOrControl+Super+Space',
       autoPasteEnabled: false,
       toneMode: 'casual',
       languageMode: 'pt-BR',
@@ -53,7 +55,20 @@ describe('useAppSettings', () => {
       historyStorageMode: 'plain',
       postprocessProfile: 'balanced',
       dualLanguageStrategy: 'fallback-on-low-confidence',
+      rewriteEnabled: true,
+      rewriteMode: 'safe',
+      intentDetectionEnabled: true,
+      protectedTerms: [],
+      lowConfidencePolicy: 'review',
+      adaptiveLearningEnabled: true,
       appProfiles: {},
+    }));
+    const getAzureCredentialStatus = vi.fn(async () => ({
+      source: 'missing',
+      storageMode: 'none',
+      hasStoredCredentials: false,
+      encryptionAvailable: true,
+      canPersistSecurely: true,
     }));
     const updateSettings = vi.fn(async () => ({ ok: false }));
 
@@ -61,6 +76,7 @@ describe('useAppSettings', () => {
       configurable: true,
       value: {
         getSettings,
+        getAzureCredentialStatus,
         updateSettings,
       },
     });
