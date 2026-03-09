@@ -136,4 +136,4 @@ assets/       Source assets used to generate app icons
 
 ## License
 
-No license file is published yet. Add one explicitly before treating this repository as open-source for reuse or redistribution.
+This project is licensed under `PolyForm Noncommercial 1.0.0`. Commercial use, resale, and other commercial exploitation are not permitted under this repository license. See [LICENSE](./LICENSE).

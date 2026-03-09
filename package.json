@@ -1,6 +1,7 @@
 {
   "name": "vox-type",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "version": "1.0.4",
   "description": "Universal push-to-talk dictation app for Windows with Azure Speech-to-Text.",
   "author": "Allysson",
