@@ -1,4 +1,4 @@
-declare module 'uiohook-napi' {
+declare module "uiohook-napi" {
   export type UiohookKeyEvent = {
     keycode: number;
     ctrlKey?: boolean;
@@ -8,8 +8,14 @@ declare module 'uiohook-napi' {
   };
 
   export const uIOhook: {
-    on: (event: 'keydown' | 'keyup' | string, cb: (event: UiohookKeyEvent) => void) => void;
-    off: (event: 'keydown' | 'keyup' | string, cb: (event: UiohookKeyEvent) => void) => void;
+    on: (
+      event: "keydown" | "keyup" | string,
+      cb: (event: UiohookKeyEvent) => void,
+    ) => void;
+    off: (
+      event: "keydown" | "keyup" | string,
+      cb: (event: UiohookKeyEvent) => void,
+    ) => void;
     start: () => void;
     stop?: () => void;
   };

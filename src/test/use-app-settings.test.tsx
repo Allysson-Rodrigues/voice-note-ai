@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { useAppSettings } from '@/hooks/useAppSettings';
-import type { AppToastInput } from '@/hooks/app-toast';
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { useAppSettings } from "@/hooks/useAppSettings";
+import type { AppToastInput } from "@/hooks/app-toast";
 
 function SettingsHarness({
   toast,
@@ -32,18 +32,18 @@ function SettingsHarness({
   );
 }
 
-describe('useAppSettings', () => {
-  it('faz rollback quando o backend nao confirma o salvamento', async () => {
+describe("useAppSettings", () => {
+  it("faz rollback quando o backend nao confirma o salvamento", async () => {
     const toast = vi.fn();
     const onHealthCheck = vi.fn(async () => undefined);
     const onHistoryRefresh = vi.fn(async () => undefined);
     const getSettings = vi.fn(async () => ({
-      hotkeyPrimary: 'CommandOrControl+Super',
-      hotkeyFallback: 'CommandOrControl+Super+Space',
+      hotkeyPrimary: "CommandOrControl+Super",
+      hotkeyFallback: "CommandOrControl+Super+Space",
       autoPasteEnabled: false,
-      toneMode: 'casual',
-      languageMode: 'pt-BR',
-      sttProvider: 'azure',
+      toneMode: "casual",
+      languageMode: "pt-BR",
+      sttProvider: "azure",
       extraPhrases: [],
       canonicalTerms: [],
       stopGraceMs: 200,
@@ -52,27 +52,27 @@ describe('useAppSettings', () => {
       historyEnabled: true,
       historyRetentionDays: 30,
       privacyMode: false,
-      historyStorageMode: 'plain',
-      postprocessProfile: 'balanced',
-      dualLanguageStrategy: 'fallback-on-low-confidence',
+      historyStorageMode: "plain",
+      postprocessProfile: "balanced",
+      dualLanguageStrategy: "fallback-on-low-confidence",
       rewriteEnabled: true,
-      rewriteMode: 'safe',
+      rewriteMode: "safe",
       intentDetectionEnabled: true,
       protectedTerms: [],
-      lowConfidencePolicy: 'review',
+      lowConfidencePolicy: "review",
       adaptiveLearningEnabled: true,
       appProfiles: {},
     }));
     const getAzureCredentialStatus = vi.fn(async () => ({
-      source: 'missing',
-      storageMode: 'none',
+      source: "missing",
+      storageMode: "none",
       hasStoredCredentials: false,
       encryptionAvailable: true,
       canPersistSecurely: true,
     }));
     const updateSettings = vi.fn(async () => ({ ok: false }));
 
-    Object.defineProperty(window, 'voiceNoteAI', {
+    Object.defineProperty(window, "voiceNoteAI", {
       configurable: true,
       value: {
         getSettings,
@@ -89,23 +89,27 @@ describe('useAppSettings', () => {
       />,
     );
 
-    await waitFor(() => expect(screen.getByTestId('privacy-mode')).toHaveTextContent('false'));
+    await waitFor(() =>
+      expect(screen.getByTestId("privacy-mode")).toHaveTextContent("false"),
+    );
 
-    fireEvent.click(screen.getByRole('button', { name: 'ativar-privado' }));
-    expect(screen.getByTestId('privacy-mode')).toHaveTextContent('true');
+    fireEvent.click(screen.getByRole("button", { name: "ativar-privado" }));
+    expect(screen.getByTestId("privacy-mode")).toHaveTextContent("true");
 
-    fireEvent.click(screen.getByRole('button', { name: 'salvar' }));
+    fireEvent.click(screen.getByRole("button", { name: "salvar" }));
 
     await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByTestId('privacy-mode')).toHaveTextContent('false'));
+    await waitFor(() =>
+      expect(screen.getByTestId("privacy-mode")).toHaveTextContent("false"),
+    );
 
     expect(onHealthCheck).not.toHaveBeenCalled();
     expect(onHistoryRefresh).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: 'Falha ao salvar preferências',
-        variant: 'destructive',
+        title: "Falha ao salvar preferências",
+        variant: "destructive",
       }),
     );
   });

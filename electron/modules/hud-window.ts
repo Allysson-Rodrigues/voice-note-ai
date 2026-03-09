@@ -1,5 +1,5 @@
-import { BrowserWindow, screen } from 'electron';
-import { hardenBrowserWindow } from './window-security.js';
+import { BrowserWindow, screen } from "electron";
+import { hardenBrowserWindow } from "./window-security.js";
 
 const HUD_MIN_WIDTH = 220;
 const HUD_MAX_WIDTH = 380;
@@ -27,26 +27,31 @@ function sleep(ms: number) {
 }
 
 function withTrailingSlash(url: string) {
-  return url.endsWith('/') ? url : `${url}/`;
+  return url.endsWith("/") ? url : `${url}/`;
 }
 
 function swapLocalhost(url: string) {
-  if (url.includes('://localhost')) return url.replace('://localhost', '://127.0.0.1');
-  if (url.includes('://127.0.0.1')) return url.replace('://127.0.0.1', '://localhost');
+  if (url.includes("://localhost"))
+    return url.replace("://localhost", "://127.0.0.1");
+  if (url.includes("://127.0.0.1"))
+    return url.replace("://127.0.0.1", "://localhost");
   return null;
 }
 
 async function loadUrlWithRetry(
   win: BrowserWindow,
   url: string,
-  opts: { label: string; attempts?: number; delayMs?: number } = { label: 'window' },
+  opts: { label: string; attempts?: number; delayMs?: number } = {
+    label: "window",
+  },
 ) {
   const attempts = Math.max(1, opts.attempts ?? 14);
   const delayMs = Math.max(80, opts.delayMs ?? 500);
 
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    if (win.isDestroyed()) throw new Error(`${opts.label} destroyed before load`);
+    if (win.isDestroyed())
+      throw new Error(`${opts.label} destroyed before load`);
     try {
       await win.loadURL(url);
       return;
@@ -58,11 +63,14 @@ async function loadUrlWithRetry(
 
   const swapped = swapLocalhost(url);
   if (!swapped) {
-    throw lastError instanceof Error ? lastError : new Error(`Failed to load ${opts.label}`);
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`Failed to load ${opts.label}`);
   }
 
   for (let attempt = 1; attempt <= 6; attempt += 1) {
-    if (win.isDestroyed()) throw new Error(`${opts.label} destroyed before load`);
+    if (win.isDestroyed())
+      throw new Error(`${opts.label} destroyed before load`);
     try {
       await win.loadURL(swapped);
       return;
@@ -72,13 +80,19 @@ async function loadUrlWithRetry(
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error(`Failed to load ${opts.label}`);
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to load ${opts.label}`);
 }
 
 function computeHudBounds(workArea: Electron.Rectangle, scaleFactor: number) {
   const safeScale = clamp(scaleFactor || 1, 1, 1.4);
-  const width = Math.round(clamp(260 * safeScale, HUD_MIN_WIDTH, HUD_MAX_WIDTH));
-  const height = Math.round(clamp(100 * safeScale, HUD_MIN_HEIGHT, HUD_MAX_HEIGHT));
+  const width = Math.round(
+    clamp(260 * safeScale, HUD_MIN_WIDTH, HUD_MAX_WIDTH),
+  );
+  const height = Math.round(
+    clamp(100 * safeScale, HUD_MIN_HEIGHT, HUD_MAX_HEIGHT),
+  );
   const marginBottom = Math.round(clamp(16 * safeScale, 10, 30));
 
   return {
@@ -122,10 +136,18 @@ function isCursorInsideZone(zone: HoverZone, cursor: Electron.Point) {
 
 function computeIdleTriggerZone(bounds: Electron.Rectangle) {
   const width = Math.round(
-    clamp(bounds.width * 0.24, HUD_IDLE_TRIGGER_MIN_WIDTH, HUD_IDLE_TRIGGER_MAX_WIDTH),
+    clamp(
+      bounds.width * 0.24,
+      HUD_IDLE_TRIGGER_MIN_WIDTH,
+      HUD_IDLE_TRIGGER_MAX_WIDTH,
+    ),
   );
   const height = Math.round(
-    clamp(bounds.height * 0.13, HUD_IDLE_TRIGGER_MIN_HEIGHT, HUD_IDLE_TRIGGER_MAX_HEIGHT),
+    clamp(
+      bounds.height * 0.13,
+      HUD_IDLE_TRIGGER_MIN_HEIGHT,
+      HUD_IDLE_TRIGGER_MAX_HEIGHT,
+    ),
   );
   const offsetX = Math.round(bounds.width * HUD_IDLE_TRIGGER_X_OFFSET_RATIO);
   return createCenteredZone(bounds, width, height, offsetX, 0);
@@ -133,16 +155,28 @@ function computeIdleTriggerZone(bounds: Electron.Rectangle) {
 
 function computeIdleHoldZone(bounds: Electron.Rectangle) {
   const width = Math.round(
-    clamp(bounds.width * 0.92, HUD_IDLE_HOLD_MIN_WIDTH, HUD_IDLE_HOLD_MAX_WIDTH),
+    clamp(
+      bounds.width * 0.92,
+      HUD_IDLE_HOLD_MIN_WIDTH,
+      HUD_IDLE_HOLD_MAX_WIDTH,
+    ),
   );
   const height = Math.round(
-    clamp(bounds.height * 0.5, HUD_IDLE_HOLD_MIN_HEIGHT, HUD_IDLE_HOLD_MAX_HEIGHT),
+    clamp(
+      bounds.height * 0.5,
+      HUD_IDLE_HOLD_MIN_HEIGHT,
+      HUD_IDLE_HOLD_MAX_HEIGHT,
+    ),
   );
   const offsetX = Math.round(bounds.width * HUD_IDLE_HOLD_X_OFFSET_RATIO);
   return createCenteredZone(bounds, width, height, offsetX, 0);
 }
 
-function resolveIdleHover(bounds: Electron.Rectangle, cursor: Electron.Point, hovered: boolean) {
+function resolveIdleHover(
+  bounds: Electron.Rectangle,
+  cursor: Electron.Point,
+  hovered: boolean,
+) {
   if (hovered) {
     return isCursorInsideZone(computeIdleHoldZone(bounds), cursor);
   }
@@ -256,7 +290,7 @@ export function createHudWindowController(options: HudWindowControllerOptions) {
 
   function ensureHudAlwaysOnTop() {
     if (!hudWindow || hudWindow.isDestroyed()) return;
-    hudWindow.setAlwaysOnTop(true, 'screen-saver');
+    hudWindow.setAlwaysOnTop(true, "screen-saver");
     hudWindow.moveTop();
   }
 
@@ -276,7 +310,7 @@ export function createHudWindowController(options: HudWindowControllerOptions) {
       skipTaskbar: !options.debug,
       alwaysOnTop: true,
       hasShadow: options.debug,
-      backgroundColor: options.debug ? '#111111' : '#00000000',
+      backgroundColor: options.debug ? "#111111" : "#00000000",
       icon: options.getIconPath(),
       webPreferences: {
         sandbox: true,
@@ -294,25 +328,27 @@ export function createHudWindowController(options: HudWindowControllerOptions) {
     ensureHudAlwaysOnTop();
     startHudHoverPolling();
 
-    hudWindow.webContents.once('did-finish-load', () => {
+    hudWindow.webContents.once("did-finish-load", () => {
       if (!hudWindow || hudWindow.isDestroyed()) return;
       if (hudVisible) {
         hudWindow.showInactive();
         ensureHudAlwaysOnTop();
       }
-      if (options.debug) hudWindow.webContents.openDevTools({ mode: 'detach' });
+      if (options.debug) hudWindow.webContents.openDevTools({ mode: "detach" });
     });
 
-    hudWindow.on('closed', () => {
+    hudWindow.on("closed", () => {
       stopHudHoverPolling();
       hudWindow = null;
     });
 
     if (options.devServerUrl) {
       const base = withTrailingSlash(options.devServerUrl);
-      await loadUrlWithRetry(hudWindow, `${base}hud.html`, { label: 'hud window' });
+      await loadUrlWithRetry(hudWindow, `${base}hud.html`, {
+        label: "hud window",
+      });
     } else {
-      await hudWindow.loadFile(options.resolveDistFile('hud.html'));
+      await hudWindow.loadFile(options.resolveDistFile("hud.html"));
     }
 
     return hudWindow;
@@ -333,7 +369,10 @@ export function createHudWindowController(options: HudWindowControllerOptions) {
 
   function applyHudBounds(display: Electron.Display) {
     if (!hudWindow || hudWindow.isDestroyed()) return;
-    hudWindow.setBounds(computeHudBounds(display.workArea, display.scaleFactor), false);
+    hudWindow.setBounds(
+      computeHudBounds(display.workArea, display.scaleFactor),
+      false,
+    );
     ensureHudAlwaysOnTop();
   }
 

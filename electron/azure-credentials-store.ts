@@ -1,15 +1,15 @@
-import { mkdir, rm } from 'node:fs/promises';
-import path from 'node:path';
+import { mkdir, rm } from "node:fs/promises";
+import path from "node:path";
 import {
   quarantineFile,
   readTextFilePair,
   unwrapStoreEnvelope,
   wrapStoreEnvelope,
   writeTextFileAtomic,
-} from './store-utils.js';
+} from "./store-utils.js";
 
-export type AzureCredentialSource = 'secure-store' | 'environment' | 'missing';
-export type AzureCredentialStorageMode = 'encrypted' | 'plain' | 'none';
+export type AzureCredentialSource = "secure-store" | "environment" | "missing";
+export type AzureCredentialStorageMode = "encrypted" | "plain" | "none";
 
 export type AzureCredentialsInput = {
   key: string;
@@ -27,14 +27,17 @@ type AzureCredentialsStoreOptions = {
 };
 
 function normalizeCredentialValue(value: string) {
-  return value.replace(/\s+/g, ' ').trim();
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function parseStoredCredentials(raw: unknown): StoredAzureCredentials | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== "object") return null;
   const item = raw as Partial<StoredAzureCredentials>;
-  const key = typeof item.key === 'string' ? item.key.trim() : '';
-  const region = typeof item.region === 'string' ? normalizeCredentialValue(item.region) : '';
+  const key = typeof item.key === "string" ? item.key.trim() : "";
+  const region =
+    typeof item.region === "string"
+      ? normalizeCredentialValue(item.region)
+      : "";
 
   if (!key || !region) return null;
 
@@ -42,7 +45,7 @@ function parseStoredCredentials(raw: unknown): StoredAzureCredentials | null {
     key,
     region,
     updatedAt:
-      typeof item.updatedAt === 'string' && item.updatedAt.trim()
+      typeof item.updatedAt === "string" && item.updatedAt.trim()
         ? item.updatedAt
         : new Date().toISOString(),
   };
@@ -55,8 +58,8 @@ function stripCredentialSource(
 ) {
   if (!value) {
     return {
-      source: 'missing' as const,
-      storageMode: 'none' as const,
+      source: "missing" as const,
+      storageMode: "none" as const,
       hasStoredCredentials: false,
       encryptionAvailable,
       canPersistSecurely: encryptionAvailable,
@@ -64,7 +67,7 @@ function stripCredentialSource(
   }
 
   return {
-    source: 'secure-store' as const,
+    source: "secure-store" as const,
     storageMode,
     hasStoredCredentials: true,
     encryptionAvailable,
@@ -78,7 +81,7 @@ export class AzureCredentialsStore {
   private readonly filePath: string;
   private readonly options: AzureCredentialsStoreOptions;
   private cached: StoredAzureCredentials | null = null;
-  private storageMode: AzureCredentialStorageMode = 'none';
+  private storageMode: AzureCredentialStorageMode = "none";
 
   constructor(filePath: string, options: AzureCredentialsStoreOptions) {
     this.filePath = filePath;
@@ -93,7 +96,7 @@ export class AzureCredentialsStore {
       this.cached = primary.credentials;
       this.storageMode = primary.storageMode;
       if (primary.needsMigration && encryptionAvailable) {
-        this.storageMode = 'encrypted';
+        this.storageMode = "encrypted";
         await this.persistCurrent();
       }
       return this.cached;
@@ -104,32 +107,36 @@ export class AzureCredentialsStore {
       this.cached = backup.credentials;
       this.storageMode = backup.storageMode;
       if (encryptionAvailable) {
-        this.storageMode = 'encrypted';
+        this.storageMode = "encrypted";
         await this.persistCurrent();
       }
       return this.cached;
     }
 
     if (pair.primary != null) {
-      await quarantineFile(this.filePath, 'corrupt');
+      await quarantineFile(this.filePath, "corrupt");
     }
     this.cached = null;
-    this.storageMode = 'none';
+    this.storageMode = "none";
     return null;
   }
 
   getStatus(env: NodeJS.ProcessEnv = process.env) {
     const encryptionAvailable = this.options.isEncryptionAvailable();
     if (this.cached) {
-      return stripCredentialSource(this.cached, this.storageMode, encryptionAvailable);
+      return stripCredentialSource(
+        this.cached,
+        this.storageMode,
+        encryptionAvailable,
+      );
     }
 
-    const key = (env.AZURE_SPEECH_KEY ?? '').trim();
-    const region = normalizeCredentialValue(env.AZURE_SPEECH_REGION ?? '');
+    const key = (env.AZURE_SPEECH_KEY ?? "").trim();
+    const region = normalizeCredentialValue(env.AZURE_SPEECH_REGION ?? "");
     if (key && region) {
       return {
-        source: 'environment' as const,
-        storageMode: 'none' as const,
+        source: "environment" as const,
+        storageMode: "none" as const,
         hasStoredCredentials: false,
         encryptionAvailable,
         canPersistSecurely: encryptionAvailable,
@@ -137,7 +144,7 @@ export class AzureCredentialsStore {
       };
     }
 
-    return stripCredentialSource(null, 'none', encryptionAvailable);
+    return stripCredentialSource(null, "none", encryptionAvailable);
   }
 
   resolve(env: NodeJS.ProcessEnv = process.env) {
@@ -145,27 +152,27 @@ export class AzureCredentialsStore {
       return {
         key: this.cached.key,
         region: this.cached.region,
-        source: 'secure-store' as AzureCredentialSource,
+        source: "secure-store" as AzureCredentialSource,
         storageMode: this.storageMode,
       };
     }
 
-    const key = (env.AZURE_SPEECH_KEY ?? '').trim();
-    const region = normalizeCredentialValue(env.AZURE_SPEECH_REGION ?? '');
+    const key = (env.AZURE_SPEECH_KEY ?? "").trim();
+    const region = normalizeCredentialValue(env.AZURE_SPEECH_REGION ?? "");
     if (key && region) {
       return {
         key,
         region,
-        source: 'environment' as AzureCredentialSource,
-        storageMode: 'none' as AzureCredentialStorageMode,
+        source: "environment" as AzureCredentialSource,
+        storageMode: "none" as AzureCredentialStorageMode,
       };
     }
 
     return {
-      key: '',
-      region: '',
-      source: 'missing' as AzureCredentialSource,
-      storageMode: 'none' as AzureCredentialStorageMode,
+      key: "",
+      region: "",
+      source: "missing" as AzureCredentialSource,
+      storageMode: "none" as AzureCredentialStorageMode,
     };
   }
 
@@ -173,11 +180,11 @@ export class AzureCredentialsStore {
     const key = input.key.trim();
     const region = normalizeCredentialValue(input.region);
     if (!key || !region) {
-      throw new Error('Azure Speech requer chave e regiao.');
+      throw new Error("Azure Speech requer chave e regiao.");
     }
     if (!this.options.isEncryptionAvailable()) {
       throw new Error(
-        'safeStorage indisponível neste ambiente. Para evitar texto simples, configure AZURE_SPEECH_KEY e AZURE_SPEECH_REGION no sistema.',
+        "safeStorage indisponível neste ambiente. Para evitar texto simples, configure AZURE_SPEECH_KEY e AZURE_SPEECH_REGION no sistema.",
       );
     }
 
@@ -186,14 +193,14 @@ export class AzureCredentialsStore {
       region,
       updatedAt: new Date().toISOString(),
     };
-    this.storageMode = 'encrypted';
+    this.storageMode = "encrypted";
     await this.persistCurrent();
     return this.getStatus();
   }
 
   async clear() {
     this.cached = null;
-    this.storageMode = 'none';
+    this.storageMode = "none";
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await rm(this.filePath, { force: true });
     await rm(`${this.filePath}.bak`, { force: true });
@@ -203,7 +210,9 @@ export class AzureCredentialsStore {
   private async persistCurrent() {
     if (!this.cached) return;
     if (!this.options.isEncryptionAvailable()) {
-      throw new Error('safeStorage indisponível para persistir credenciais com segurança.');
+      throw new Error(
+        "safeStorage indisponível para persistir credenciais com segurança.",
+      );
     }
     const serialized = JSON.stringify(wrapStoreEnvelope(this.cached), null, 2);
     const content = this.options.encryptString(serialized);
@@ -213,14 +222,17 @@ export class AzureCredentialsStore {
   private async tryParse(content: string | null) {
     if (content == null) return null;
 
-    const attempts: Array<{ raw: string; storageMode: AzureCredentialStorageMode }> = [];
-    attempts.push({ raw: content, storageMode: 'plain' });
+    const attempts: Array<{
+      raw: string;
+      storageMode: AzureCredentialStorageMode;
+    }> = [];
+    attempts.push({ raw: content, storageMode: "plain" });
 
     if (this.options.isEncryptionAvailable()) {
       try {
         attempts.unshift({
           raw: this.options.decryptString(content),
-          storageMode: 'encrypted',
+          storageMode: "encrypted",
         });
       } catch {
         // ignore encrypted parsing fallback
@@ -237,7 +249,8 @@ export class AzureCredentialsStore {
             credentials,
             storageMode: attempt.storageMode,
             needsMigration:
-              attempt.storageMode === 'plain' && this.options.isEncryptionAvailable()
+              attempt.storageMode === "plain" &&
+              this.options.isEncryptionAvailable()
                 ? true
                 : envelope.version < 1,
           };

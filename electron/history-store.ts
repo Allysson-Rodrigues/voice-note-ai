@@ -1,13 +1,13 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from "node:crypto";
 import {
   quarantineFile,
   readTextFilePair,
   unwrapStoreEnvelope,
   wrapStoreEnvelope,
   writeTextFileAtomic,
-} from './store-utils.js';
+} from "./store-utils.js";
 
-export type HistorySkipReason = 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
+export type HistorySkipReason = "WINDOW_CHANGED" | "PASTE_FAILED" | "TIMEOUT";
 
 export type HistoryEntry = {
   id: string;
@@ -30,10 +30,10 @@ export type HistoryEntry = {
   };
   intent?: string;
   rewriteApplied?: boolean;
-  rewriteRisk?: 'low' | 'medium' | 'high';
+  rewriteRisk?: "low" | "medium" | "high";
   appKey?: string;
   injectionMethod?: string;
-  confidenceBucket?: 'high' | 'medium' | 'low';
+  confidenceBucket?: "high" | "medium" | "low";
   createdAt: string;
 };
 
@@ -63,10 +63,10 @@ export type HistoryAppendInput = {
   };
   intent?: string;
   rewriteApplied?: boolean;
-  rewriteRisk?: 'low' | 'medium' | 'high';
+  rewriteRisk?: "low" | "medium" | "high";
   appKey?: string;
   injectionMethod?: string;
-  confidenceBucket?: 'high' | 'medium' | 'low';
+  confidenceBucket?: "high" | "medium" | "low";
   createdAt?: string;
 };
 
@@ -77,22 +77,23 @@ type HistoryCodec = {
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number) {
-  const n = typeof value === 'number' ? value : Number(value);
+  const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.round(n)));
 }
 
 function normalizeText(value: string) {
   return value
-    .replace(/\r\n?/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
 function parseOptionalNumber(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value);
-  if (typeof value === 'string') {
+  if (typeof value === "number" && Number.isFinite(value))
+    return Math.round(value);
+  if (typeof value === "string") {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) return Math.round(parsed);
   }
@@ -100,7 +101,7 @@ function parseOptionalNumber(value: unknown) {
 }
 
 function parseOptionalString(value: unknown, maxLength: number) {
-  if (typeof value !== 'string') return undefined;
+  if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
   return trimmed.slice(0, maxLength);
@@ -109,7 +110,7 @@ function parseOptionalString(value: unknown, maxLength: number) {
 function parseStringList(value: unknown, maxItems: number, maxLength: number) {
   if (!Array.isArray(value)) return undefined;
   return value
-    .filter((entry): entry is string => typeof entry === 'string')
+    .filter((entry): entry is string => typeof entry === "string")
     .map((entry) => entry.trim())
     .filter(Boolean)
     .slice(0, maxItems)
@@ -117,22 +118,23 @@ function parseStringList(value: unknown, maxItems: number, maxLength: number) {
 }
 
 function parseHistoryEntry(raw: unknown): HistoryEntry | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== "object") return null;
   const item = raw as Partial<HistoryEntry>;
-  const id = typeof item.id === 'string' ? item.id.trim() : '';
-  const sessionId = typeof item.sessionId === 'string' ? item.sessionId.trim() : '';
-  const text = typeof item.text === 'string' ? normalizeText(item.text) : '';
+  const id = typeof item.id === "string" ? item.id.trim() : "";
+  const sessionId =
+    typeof item.sessionId === "string" ? item.sessionId.trim() : "";
+  const text = typeof item.text === "string" ? normalizeText(item.text) : "";
   const createdAt =
-    typeof item.createdAt === 'string' && item.createdAt
+    typeof item.createdAt === "string" && item.createdAt
       ? item.createdAt
       : new Date().toISOString();
 
   if (!id || !sessionId || !text) return null;
 
   const skippedReason =
-    item.skippedReason === 'WINDOW_CHANGED' ||
-    item.skippedReason === 'PASTE_FAILED' ||
-    item.skippedReason === 'TIMEOUT'
+    item.skippedReason === "WINDOW_CHANGED" ||
+    item.skippedReason === "PASTE_FAILED" ||
+    item.skippedReason === "TIMEOUT"
       ? item.skippedReason
       : undefined;
 
@@ -152,24 +154,31 @@ function parseHistoryEntry(raw: unknown): HistoryEntry | null {
     languageChosen: parseOptionalString(item.languageChosen, 24),
     appliedRules: parseStringList(item.appliedRules, 40, 80),
     confidenceSummary:
-      item.confidenceSummary && typeof item.confidenceSummary === 'object'
+      item.confidenceSummary && typeof item.confidenceSummary === "object"
         ? {
-            best: parseOptionalNumber((item.confidenceSummary as { best?: unknown }).best),
-            mode: parseOptionalString((item.confidenceSummary as { mode?: unknown }).mode, 40),
+            best: parseOptionalNumber(
+              (item.confidenceSummary as { best?: unknown }).best,
+            ),
+            mode: parseOptionalString(
+              (item.confidenceSummary as { mode?: unknown }).mode,
+              40,
+            ),
           }
         : undefined,
     intent: parseOptionalString(item.intent, 40),
     rewriteApplied: item.rewriteApplied === true,
     rewriteRisk:
-      item.rewriteRisk === 'low' || item.rewriteRisk === 'medium' || item.rewriteRisk === 'high'
+      item.rewriteRisk === "low" ||
+      item.rewriteRisk === "medium" ||
+      item.rewriteRisk === "high"
         ? item.rewriteRisk
         : undefined,
     appKey: parseOptionalString(item.appKey, 80),
     injectionMethod: parseOptionalString(item.injectionMethod, 40),
     confidenceBucket:
-      item.confidenceBucket === 'high' ||
-      item.confidenceBucket === 'medium' ||
-      item.confidenceBucket === 'low'
+      item.confidenceBucket === "high" ||
+      item.confidenceBucket === "medium" ||
+      item.confidenceBucket === "low"
         ? item.confidenceBucket
         : undefined,
     createdAt,
@@ -180,7 +189,8 @@ function sortNewestFirst(entries: HistoryEntry[]) {
   return entries.slice().sort((a, b) => {
     const bt = Date.parse(b.createdAt);
     const at = Date.parse(a.createdAt);
-    if (!Number.isFinite(bt) || !Number.isFinite(at)) return b.createdAt.localeCompare(a.createdAt);
+    if (!Number.isFinite(bt) || !Number.isFinite(at))
+      return b.createdAt.localeCompare(a.createdAt);
     return bt - at;
   });
 }
@@ -196,19 +206,25 @@ export class HistoryStore {
 
   async list(params: HistoryListParams = {}): Promise<HistoryEntry[]> {
     const entries = sortNewestFirst(await this.loadRaw());
-    const query = (params.query ?? '').trim().toLocaleLowerCase();
+    const query = (params.query ?? "").trim().toLocaleLowerCase();
     const filtered = query
-      ? entries.filter((entry) => entry.text.toLocaleLowerCase().includes(query))
+      ? entries.filter((entry) =>
+          entry.text.toLocaleLowerCase().includes(query),
+        )
       : entries;
     const offset = clampInt(params.offset, 0, 100000, 0);
     const limit = clampInt(params.limit, 1, 500, 100);
     return filtered.slice(offset, offset + limit);
   }
 
-  async append(input: HistoryAppendInput, retentionDays: number): Promise<HistoryEntry> {
+  async append(
+    input: HistoryAppendInput,
+    retentionDays: number,
+  ): Promise<HistoryEntry> {
     const text = normalizeText(input.text);
-    if (!text) throw new Error('History entry text is required.');
-    if (!input.sessionId?.trim()) throw new Error('History entry sessionId is required.');
+    if (!text) throw new Error("History entry text is required.");
+    if (!input.sessionId?.trim())
+      throw new Error("History entry sessionId is required.");
 
     const next: HistoryEntry = {
       id: randomUUID(),
@@ -235,21 +251,23 @@ export class HistoryStore {
       intent: parseOptionalString(input.intent, 40),
       rewriteApplied: input.rewriteApplied === true,
       rewriteRisk:
-        input.rewriteRisk === 'low' ||
-        input.rewriteRisk === 'medium' ||
-        input.rewriteRisk === 'high'
+        input.rewriteRisk === "low" ||
+        input.rewriteRisk === "medium" ||
+        input.rewriteRisk === "high"
           ? input.rewriteRisk
           : undefined,
       appKey: parseOptionalString(input.appKey, 80),
       injectionMethod: parseOptionalString(input.injectionMethod, 40),
       confidenceBucket:
-        input.confidenceBucket === 'high' ||
-        input.confidenceBucket === 'medium' ||
-        input.confidenceBucket === 'low'
+        input.confidenceBucket === "high" ||
+        input.confidenceBucket === "medium" ||
+        input.confidenceBucket === "low"
           ? input.confidenceBucket
           : undefined,
       createdAt:
-        input.createdAt && input.createdAt.trim() ? input.createdAt : new Date().toISOString(),
+        input.createdAt && input.createdAt.trim()
+          ? input.createdAt
+          : new Date().toISOString(),
     };
 
     const entries = await this.loadRaw();
@@ -260,7 +278,7 @@ export class HistoryStore {
 
   async remove(id: string): Promise<{ ok: boolean }> {
     const cleanId = id.trim();
-    if (!cleanId) throw new Error('History entry id is required.');
+    if (!cleanId) throw new Error("History entry id is required.");
 
     const entries = await this.loadRaw();
     const next = entries.filter((item) => item.id !== cleanId);
@@ -269,7 +287,9 @@ export class HistoryStore {
     return { ok: removed };
   }
 
-  async clear(params: { before?: string } = {}): Promise<{ ok: boolean; removed: number }> {
+  async clear(
+    params: { before?: string } = {},
+  ): Promise<{ ok: boolean; removed: number }> {
     const entries = await this.loadRaw();
     if (!params.before) {
       if (entries.length > 0) await this.persist([]);
@@ -277,7 +297,7 @@ export class HistoryStore {
     }
 
     const cutoff = Date.parse(params.before);
-    if (!Number.isFinite(cutoff)) throw new Error('Invalid clear cutoff date.');
+    if (!Number.isFinite(cutoff)) throw new Error("Invalid clear cutoff date.");
 
     const next = entries.filter((item) => Date.parse(item.createdAt) > cutoff);
     const removed = entries.length - next.length;
@@ -318,7 +338,7 @@ export class HistoryStore {
     }
 
     if (pair.primary != null) {
-      await quarantineFile(this.filePath, 'corrupt');
+      await quarantineFile(this.filePath, "corrupt");
     }
 
     return [];
@@ -327,7 +347,9 @@ export class HistoryStore {
   private async persist(entries: HistoryEntry[]): Promise<void> {
     await writeTextFileAtomic(
       this.filePath,
-      this.encodeContent(JSON.stringify(wrapStoreEnvelope(sortNewestFirst(entries)), null, 2)),
+      this.encodeContent(
+        JSON.stringify(wrapStoreEnvelope(sortNewestFirst(entries)), null, 2),
+      ),
     );
   }
 
@@ -341,7 +363,8 @@ export class HistoryStore {
   }
 
   private encodeContent(content: string) {
-    if (!this.codec?.encryptString || !this.codec.isEncryptionAvailable?.()) return content;
+    if (!this.codec?.encryptString || !this.codec.isEncryptionAvailable?.())
+      return content;
     try {
       return this.codec.encryptString(content);
     } catch {
@@ -368,8 +391,8 @@ export class HistoryStore {
       for (const item of envelope.data) {
         if (
           item &&
-          typeof item === 'object' &&
-          typeof (item as { rawText?: unknown }).rawText === 'string' &&
+          typeof item === "object" &&
+          typeof (item as { rawText?: unknown }).rawText === "string" &&
           (item as { rawText: string }).rawText.trim()
         ) {
           needsMigration = true;

@@ -1,11 +1,11 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID } from "node:crypto";
 import {
   quarantineFile,
   readTextFilePair,
   unwrapStoreEnvelope,
   wrapStoreEnvelope,
   writeTextFileAtomic,
-} from './store-utils.js';
+} from "./store-utils.js";
 
 export type DictionaryTerm = {
   id: string;
@@ -28,7 +28,7 @@ export type DictionaryUpdateInput = {
 };
 
 export function normalizeDictionaryTerm(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+  return value.replace(/\s+/g, " ").trim();
 }
 
 export function dedupeCaseInsensitive(values: string[]): string[] {
@@ -46,7 +46,7 @@ export function dedupeCaseInsensitive(values: string[]): string[] {
 }
 
 function normalizeHint(value?: string): string | undefined {
-  if (typeof value !== 'string') return undefined;
+  if (typeof value !== "string") return undefined;
   const normalized = normalizeDictionaryTerm(value);
   return normalized || undefined;
 }
@@ -58,10 +58,12 @@ function parseDictionary(raw: unknown): DictionaryTerm[] {
   const seenTerms = new Set<string>();
 
   for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
+    if (!item || typeof item !== "object") continue;
     const candidate = item as Partial<DictionaryTerm>;
-    if (typeof candidate.id !== 'string' || !candidate.id.trim()) continue;
-    const term = normalizeDictionaryTerm(typeof candidate.term === 'string' ? candidate.term : '');
+    if (typeof candidate.id !== "string" || !candidate.id.trim()) continue;
+    const term = normalizeDictionaryTerm(
+      typeof candidate.term === "string" ? candidate.term : "",
+    );
     if (!term) continue;
 
     const id = candidate.id.trim();
@@ -77,7 +79,7 @@ function parseDictionary(raw: unknown): DictionaryTerm[] {
       hintPt: normalizeHint(candidate.hintPt),
       enabled: candidate.enabled !== false,
       createdAt:
-        typeof candidate.createdAt === 'string' && candidate.createdAt
+        typeof candidate.createdAt === "string" && candidate.createdAt
           ? candidate.createdAt
           : new Date().toISOString(),
     });
@@ -101,7 +103,7 @@ export class DictionaryStore {
   async add(input: DictionaryAddInput): Promise<DictionaryTerm> {
     const term = normalizeDictionaryTerm(input.term);
     if (!term) {
-      throw new Error('Term is required.');
+      throw new Error("Term is required.");
     }
 
     const entries = await this.loadRaw();
@@ -109,7 +111,7 @@ export class DictionaryStore {
       (item) => item.term.toLocaleLowerCase() === term.toLocaleLowerCase(),
     );
     if (exists) {
-      throw new Error('Term already exists.');
+      throw new Error("Term already exists.");
     }
 
     const next: DictionaryTerm = {
@@ -128,36 +130,43 @@ export class DictionaryStore {
   async update(input: DictionaryUpdateInput): Promise<DictionaryTerm> {
     const id = input.id?.trim();
     if (!id) {
-      throw new Error('Term id is required.');
+      throw new Error("Term id is required.");
     }
 
     const entries = await this.loadRaw();
     const index = entries.findIndex((item) => item.id === id);
     if (index < 0) {
-      throw new Error('Term not found.');
+      throw new Error("Term not found.");
     }
 
     const current = entries[index];
     const nextTerm =
-      typeof input.term === 'string' ? normalizeDictionaryTerm(input.term) : current.term;
+      typeof input.term === "string"
+        ? normalizeDictionaryTerm(input.term)
+        : current.term;
 
     if (!nextTerm) {
-      throw new Error('Term cannot be empty.');
+      throw new Error("Term cannot be empty.");
     }
 
     const duplicate = entries.some(
       (item, currentIndex) =>
-        currentIndex !== index && item.term.toLocaleLowerCase() === nextTerm.toLocaleLowerCase(),
+        currentIndex !== index &&
+        item.term.toLocaleLowerCase() === nextTerm.toLocaleLowerCase(),
     );
     if (duplicate) {
-      throw new Error('Term already exists.');
+      throw new Error("Term already exists.");
     }
 
     const updated: DictionaryTerm = {
       ...current,
       term: nextTerm,
-      hintPt: typeof input.hintPt === 'string' ? normalizeHint(input.hintPt) : current.hintPt,
-      enabled: typeof input.enabled === 'boolean' ? input.enabled : current.enabled,
+      hintPt:
+        typeof input.hintPt === "string"
+          ? normalizeHint(input.hintPt)
+          : current.hintPt,
+      enabled:
+        typeof input.enabled === "boolean" ? input.enabled : current.enabled,
     };
 
     entries[index] = updated;
@@ -168,7 +177,7 @@ export class DictionaryStore {
   async remove(id: string): Promise<{ ok: boolean }> {
     const cleanId = id.trim();
     if (!cleanId) {
-      throw new Error('Term id is required.');
+      throw new Error("Term id is required.");
     }
 
     const entries = await this.loadRaw();
@@ -184,7 +193,7 @@ export class DictionaryStore {
     const entries = await this.loadRaw();
     const terms = entries
       .filter((item) => item.enabled)
-      .flatMap((item) => [item.term, item.hintPt ?? '']);
+      .flatMap((item) => [item.term, item.hintPt ?? ""]);
 
     return dedupeCaseInsensitive([...extraValues, ...terms]);
   }
@@ -197,9 +206,12 @@ export class DictionaryStore {
     };
   }
 
-  async import(payload: { terms: DictionaryTerm[]; mode?: 'replace' | 'merge' }) {
+  async import(payload: {
+    terms: DictionaryTerm[];
+    mode?: "replace" | "merge";
+  }) {
     const nextTerms = parseDictionary(payload.terms);
-    const current = payload.mode === 'replace' ? [] : await this.loadRaw();
+    const current = payload.mode === "replace" ? [] : await this.loadRaw();
     const merged = parseDictionary([...current, ...nextTerms]);
     await this.persist(merged);
     return { ok: true, count: merged.length };
@@ -222,14 +234,17 @@ export class DictionaryStore {
     }
 
     if (pair.primary != null) {
-      await quarantineFile(this.filePath, 'corrupt');
+      await quarantineFile(this.filePath, "corrupt");
     }
 
     return [];
   }
 
   private async persist(entries: DictionaryTerm[]): Promise<void> {
-    await writeTextFileAtomic(this.filePath, JSON.stringify(wrapStoreEnvelope(entries), null, 2));
+    await writeTextFileAtomic(
+      this.filePath,
+      JSON.stringify(wrapStoreEnvelope(entries), null, 2),
+    );
   }
 
   private tryParse(content: string | null) {

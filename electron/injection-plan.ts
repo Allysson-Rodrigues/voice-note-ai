@@ -1,6 +1,13 @@
-export type PasteAttempt = 'target-handle' | 'foreground-handle' | 'ctrl-v' | 'shift-insert';
+export type PasteAttempt =
+  | "target-handle"
+  | "foreground-handle"
+  | "ctrl-v"
+  | "shift-insert";
 
-export function isInternalHandle(handle: string | null, internalHandles: Array<string | null>) {
+export function isInternalHandle(
+  handle: string | null,
+  internalHandles: Array<string | null>,
+) {
   if (!handle) return false;
   return internalHandles.some((entry) => entry === handle);
 }
@@ -16,7 +23,10 @@ export function resolvePreferredWindowHandle(params: {
     return currentHandle;
   }
 
-  if (sessionTargetWindowHandle && !isInternalHandle(sessionTargetWindowHandle, internalHandles)) {
+  if (
+    sessionTargetWindowHandle &&
+    !isInternalHandle(sessionTargetWindowHandle, internalHandles)
+  ) {
     return sessionTargetWindowHandle;
   }
 
@@ -30,25 +40,29 @@ export function buildPasteAttemptOrder(params: {
   preferredAttempt?: PasteAttempt | null;
 }) {
   const attempts: PasteAttempt[] = [];
-  const { targetReady, targetHandle, foregroundHandle, preferredAttempt } = params;
+  const { targetReady, targetHandle, foregroundHandle, preferredAttempt } =
+    params;
 
   if (targetReady && targetHandle) {
-    attempts.push('target-handle');
+    attempts.push("target-handle");
   }
 
   if (foregroundHandle && (!targetReady || foregroundHandle !== targetHandle)) {
-    attempts.push('foreground-handle');
+    attempts.push("foreground-handle");
   }
 
-  attempts.push('ctrl-v', 'shift-insert');
+  attempts.push("ctrl-v", "shift-insert");
 
   if (preferredAttempt && attempts.includes(preferredAttempt)) {
-    return [preferredAttempt, ...attempts.filter((item) => item !== preferredAttempt)];
+    return [
+      preferredAttempt,
+      ...attempts.filter((item) => item !== preferredAttempt),
+    ];
   }
 
   return attempts;
 }
 
 export function resolvePasteFailureReason(targetReady: boolean) {
-  return targetReady ? ('PASTE_FAILED' as const) : ('WINDOW_CHANGED' as const);
+  return targetReady ? ("PASTE_FAILED" as const) : ("WINDOW_CHANGED" as const);
 }

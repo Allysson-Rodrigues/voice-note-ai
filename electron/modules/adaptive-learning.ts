@@ -1,10 +1,10 @@
-import type { AdaptiveStoreState } from '../adaptive-store.js';
-import type { AppSettings, TranscriptFormatStyle } from '../settings-store.js';
+import type { AdaptiveStoreState } from "../adaptive-store.js";
+import type { AppSettings, TranscriptFormatStyle } from "../settings-store.js";
 
 export type AdaptiveSuggestion =
   | {
       id: string;
-      type: 'protected-term';
+      type: "protected-term";
       appKey: string;
       confidence: number;
       reason: string;
@@ -12,7 +12,7 @@ export type AdaptiveSuggestion =
     }
   | {
       id: string;
-      type: 'format-style';
+      type: "format-style";
       appKey: string;
       confidence: number;
       reason: string;
@@ -20,36 +20,36 @@ export type AdaptiveSuggestion =
     }
   | {
       id: string;
-      type: 'language-bias';
+      type: "language-bias";
       appKey: string;
       confidence: number;
       reason: string;
-      payload: { languageBias: 'pt-BR' | 'en-US' };
+      payload: { languageBias: "pt-BR" | "en-US" };
     };
 
 const COMMON_WORDS = new Set([
-  'para',
-  'com',
-  'sem',
-  'isso',
-  'essa',
-  'esse',
-  'projeto',
-  'revisar',
-  'enviar',
-  'texto',
-  'sobre',
-  'mais',
-  'pode',
-  'quando',
-  'porque',
-  'where',
-  'this',
-  'that',
-  'with',
-  'from',
-  'have',
-  'will',
+  "para",
+  "com",
+  "sem",
+  "isso",
+  "essa",
+  "esse",
+  "projeto",
+  "revisar",
+  "enviar",
+  "texto",
+  "sobre",
+  "mais",
+  "pode",
+  "quando",
+  "porque",
+  "where",
+  "this",
+  "that",
+  "with",
+  "from",
+  "have",
+  "will",
 ]);
 
 function isCandidateProtectedTerm(term: string) {
@@ -60,7 +60,9 @@ function isCandidateProtectedTerm(term: string) {
 }
 
 function topEntry(input: Record<string, number>) {
-  const entries = Object.entries(input).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const entries = Object.entries(input).sort(
+    (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
+  );
   return entries[0]
     ? {
         key: entries[0][0],
@@ -71,11 +73,11 @@ function topEntry(input: Record<string, number>) {
 }
 
 function formatStyleFromIntent(intent: string): TranscriptFormatStyle | null {
-  if (intent === 'bullet-list') return 'bullet-list';
-  if (intent === 'numbered-list') return 'notes';
-  if (intent === 'email') return 'email';
-  if (intent === 'chat') return 'message';
-  if (intent === 'technical-note') return 'technical-note';
+  if (intent === "bullet-list") return "bullet-list";
+  if (intent === "numbered-list") return "notes";
+  if (intent === "email") return "email";
+  if (intent === "chat") return "message";
+  if (intent === "technical-note") return "technical-note";
   return null;
 }
 
@@ -91,11 +93,13 @@ export function generateAdaptiveSuggestions(
     const currentProfile = settings.appProfiles?.[appKey] ?? {};
 
     const topIntent = topEntry(stats.intentCounts);
-    const suggestedFormatStyle = topIntent ? formatStyleFromIntent(topIntent.key) : null;
+    const suggestedFormatStyle = topIntent
+      ? formatStyleFromIntent(topIntent.key)
+      : null;
     if (
       topIntent &&
       suggestedFormatStyle &&
-      topIntent.key !== 'free-text' &&
+      topIntent.key !== "free-text" &&
       topIntent.count >= 3 &&
       topIntent.count / Math.max(1, topIntent.total) >= 0.6 &&
       currentProfile.formatStyle !== suggestedFormatStyle
@@ -104,9 +108,11 @@ export function generateAdaptiveSuggestions(
       if (!dismissed.has(id)) {
         suggestions.push({
           id,
-          type: 'format-style',
+          type: "format-style",
           appKey,
-          confidence: Number((topIntent.count / Math.max(1, topIntent.total)).toFixed(2)),
+          confidence: Number(
+            (topIntent.count / Math.max(1, topIntent.total)).toFixed(2),
+          ),
           reason: `O app ${appKey} recebeu principalmente sessões do tipo ${topIntent.key}.`,
           payload: { formatStyle: suggestedFormatStyle },
         });
@@ -116,7 +122,7 @@ export function generateAdaptiveSuggestions(
     const topLanguage = topEntry(stats.languageCounts);
     if (
       topLanguage &&
-      (topLanguage.key === 'pt-BR' || topLanguage.key === 'en-US') &&
+      (topLanguage.key === "pt-BR" || topLanguage.key === "en-US") &&
       topLanguage.count >= 3 &&
       topLanguage.count / Math.max(1, topLanguage.total) >= 0.72 &&
       currentProfile.languageBias !== topLanguage.key
@@ -125,9 +131,11 @@ export function generateAdaptiveSuggestions(
       if (!dismissed.has(id)) {
         suggestions.push({
           id,
-          type: 'language-bias',
+          type: "language-bias",
           appKey,
-          confidence: Number((topLanguage.count / Math.max(1, topLanguage.total)).toFixed(2)),
+          confidence: Number(
+            (topLanguage.count / Math.max(1, topLanguage.total)).toFixed(2),
+          ),
           reason: `O app ${appKey} terminou com ${topLanguage.key} na maioria das sessões.`,
           payload: { languageBias: topLanguage.key },
         });
@@ -135,9 +143,10 @@ export function generateAdaptiveSuggestions(
     }
 
     const existingProtected = new Set(
-      [...(settings.protectedTerms ?? []), ...(currentProfile.protectedTerms ?? [])].map((entry) =>
-        entry.toLocaleLowerCase(),
-      ),
+      [
+        ...(settings.protectedTerms ?? []),
+        ...(currentProfile.protectedTerms ?? []),
+      ].map((entry) => entry.toLocaleLowerCase()),
     );
     const topTerms = Object.values(stats.termStats)
       .filter((term) => term.count >= 4 && isCandidateProtectedTerm(term.term))
@@ -147,13 +156,16 @@ export function generateAdaptiveSuggestions(
     for (const term of topTerms) {
       if (existingProtected.has(term.term.toLocaleLowerCase())) continue;
       const confidence = Number(
-        Math.min(0.95, term.count / Math.max(4, stats.sessionCount + 1)).toFixed(2),
+        Math.min(
+          0.95,
+          term.count / Math.max(4, stats.sessionCount + 1),
+        ).toFixed(2),
       );
       const id = `protected-term:${appKey}:${term.term.toLocaleLowerCase()}`;
       if (dismissed.has(id)) continue;
       suggestions.push({
         id,
-        type: 'protected-term',
+        type: "protected-term",
         appKey,
         confidence,
         reason: `O termo ${term.term} apareceu ${term.count} vezes no contexto ${appKey}.`,

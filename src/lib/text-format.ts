@@ -1,5 +1,8 @@
-import type { CanonicalTerm } from '@/electron';
-import { applyTranscriptPostprocess, type ToneMode } from '@/lib/transcript-postprocess';
+import type { CanonicalTerm } from "@/electron";
+import {
+  applyTranscriptPostprocess,
+  type ToneMode,
+} from "@/lib/transcript-postprocess";
 
 export type { ToneMode };
 

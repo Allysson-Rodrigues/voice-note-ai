@@ -1,11 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
-import { AzureSttProvider } from './azure-provider.js';
-import type { SttProviderEvents } from './types.js';
+import { describe, expect, it, vi } from "vitest";
+import { AzureSttProvider } from "./azure-provider.js";
+import type { SttProviderEvents } from "./types.js";
 
 type RecognizerStub = {
-  recognizing?: (sender: unknown, event: { result?: { text?: string } }) => void;
-  recognized?: (sender: unknown, event: { result?: { text?: string; json?: string } }) => void;
-  canceled?: (sender: unknown, event: { errorDetails?: unknown; reason?: unknown }) => void;
+  recognizing?: (
+    sender: unknown,
+    event: { result?: { text?: string } },
+  ) => void;
+  recognized?: (
+    sender: unknown,
+    event: { result?: { text?: string; json?: string } },
+  ) => void;
+  canceled?: (
+    sender: unknown,
+    event: { errorDetails?: unknown; reason?: unknown },
+  ) => void;
   startContinuousRecognitionAsync: (
     onSuccess: () => void,
     _onError: (error: unknown) => void,
@@ -21,7 +30,7 @@ function createSdkStub(recognizers: RecognizerStub[]) {
   return {
     SpeechConfig: {
       fromSubscription: () => ({
-        speechRecognitionLanguage: 'pt-BR',
+        speechRecognitionLanguage: "pt-BR",
         setProperty: vi.fn(),
       }),
     },
@@ -40,7 +49,7 @@ function createSdkStub(recognizers: RecognizerStub[]) {
     SpeechRecognizer: vi.fn(() => {
       const recognizer = recognizers.shift();
       if (!recognizer) {
-        throw new Error('Recognizer stub missing.');
+        throw new Error("Recognizer stub missing.");
       }
       return recognizer;
     }),
@@ -55,12 +64,12 @@ function createRecognizerStub(): RecognizerStub {
   };
 }
 
-describe('AzureSttProvider dual language', () => {
-  it('promotes the secondary slot when it has the best recognized result in parallel mode', async () => {
+describe("AzureSttProvider dual language", () => {
+  it("promotes the secondary slot when it has the best recognized result in parallel mode", async () => {
     const primary = createRecognizerStub();
     const secondary = createRecognizerStub();
     const provider = new AzureSttProvider(
-      { key: 'key', region: 'region' },
+      { key: "key", region: "region" },
       async () => createSdkStub([primary, secondary]) as never,
     );
 
@@ -70,27 +79,27 @@ describe('AzureSttProvider dual language', () => {
       onError: vi.fn(),
     };
 
-    await provider.start('session-1', 'dual', [], events, {
-      dualLanguageStrategy: 'parallel',
+    await provider.start("session-1", "dual", [], events, {
+      dualLanguageStrategy: "parallel",
     });
 
     primary.recognized?.(null, {
       result: {
-        text: 'ola mundo',
+        text: "ola mundo",
         json: JSON.stringify({ NBest: [{ Confidence: 0.41 }] }),
       },
     });
     secondary.recognized?.(null, {
       result: {
-        text: 'hello world',
+        text: "hello world",
         json: JSON.stringify({ NBest: [{ Confidence: 0.93 }] }),
       },
     });
 
-    expect(events.onRecognized).toHaveBeenLastCalledWith('session-1', {
-      text: 'hello world',
+    expect(events.onRecognized).toHaveBeenLastCalledWith("session-1", {
+      text: "hello world",
       confidence: 0.93,
-      language: 'en-US',
+      language: "en-US",
     });
   });
 });

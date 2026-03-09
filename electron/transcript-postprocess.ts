@@ -2,20 +2,20 @@ export type CanonicalTerm = {
   from: string;
   to: string;
   enabled: boolean;
-  scope?: 'global' | 'app' | 'language';
+  scope?: "global" | "app" | "language";
   appKeys?: string[];
-  confidencePolicy?: 'always' | 'safe-only';
+  confidencePolicy?: "always" | "safe-only";
 };
 
-export type ToneMode = 'formal' | 'casual' | 'very-casual';
-export type PostprocessProfile = 'safe' | 'balanced' | 'aggressive';
+export type ToneMode = "formal" | "casual" | "very-casual";
+export type PostprocessProfile = "safe" | "balanced" | "aggressive";
 export type TranscriptIntent =
-  | 'free-text'
-  | 'bullet-list'
-  | 'numbered-list'
-  | 'email'
-  | 'chat'
-  | 'technical-note';
+  | "free-text"
+  | "bullet-list"
+  | "numbered-list"
+  | "email"
+  | "chat"
+  | "technical-note";
 
 export type TranscriptPostprocessOptions = {
   toneMode: ToneMode;
@@ -24,7 +24,7 @@ export type TranscriptPostprocessOptions = {
   profile?: PostprocessProfile;
   appKey?: string | null;
   intent?: TranscriptIntent;
-  language?: 'pt-BR' | 'en-US';
+  language?: "pt-BR" | "en-US";
   protectedTerms?: string[];
 };
 
@@ -34,9 +34,9 @@ export type TranscriptPostprocessDebug = {
   appliedRules: string[];
 };
 
-const WORD_BOUNDARY_LEFT = '(?<![A-Za-z0-9_])';
-const WORD_BOUNDARY_RIGHT = '(?![A-Za-z0-9_])';
-const WORD_REGEX_FLAGS = 'gi';
+const WORD_BOUNDARY_LEFT = "(?<![A-Za-z0-9_])";
+const WORD_BOUNDARY_RIGHT = "(?![A-Za-z0-9_])";
+const WORD_REGEX_FLAGS = "gi";
 const LETTER_SEQ_RE = /[A-Za-z]+/;
 const PUNCT_SYMBOL_RE = /^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g;
 const UPPER_RE = /[A-Z]/;
@@ -45,15 +45,15 @@ const BREATH_CONTINUATION_TOKEN_RE =
   /(e|mas|porque|que|pra|para|com|sem|por|quando|enquanto|onde|se|como|de|do|da|em|no|na|and|but|because|with|for|while|if|then)\b/i;
 
 function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function normalizeWhitespace(value: string) {
   return value
-    .replace(/\r\n?/g, '\n')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/ *\n */g, '\n')
-    .replace(/\s+([,.;!?])/g, '$1')
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\s+([,.;!?])/g, "$1")
     .trim();
 }
 
@@ -63,7 +63,7 @@ function capitalizeFirst(value: string) {
 }
 
 function shouldPreserveCase(token: string) {
-  const cleaned = token.replace(PUNCT_SYMBOL_RE, '');
+  const cleaned = token.replace(PUNCT_SYMBOL_RE, "");
   if (cleaned.length <= 1) return false;
   const hasUpper = UPPER_RE.test(cleaned);
   const hasLower = LOWER_RE.test(cleaned);
@@ -88,48 +88,51 @@ function lowerFirstPreserveCase(value: string) {
 }
 
 function commandRegex(pattern: string) {
-  return new RegExp(`${WORD_BOUNDARY_LEFT}(?:${pattern})${WORD_BOUNDARY_RIGHT}`, WORD_REGEX_FLAGS);
+  return new RegExp(
+    `${WORD_BOUNDARY_LEFT}(?:${pattern})${WORD_BOUNDARY_RIGHT}`,
+    WORD_REGEX_FLAGS,
+  );
 }
 
 function formatCommandHintRegex() {
   return new RegExp(
     [
-      'nova\\s+linha',
-      'new\\s+line',
-      'bullet\\s+point',
-      'bullet',
-      't[oó]pico',
-      'topico',
-      'item\\s+\\d{1,2}',
-      'n[uú]mero\\s+\\d{1,2}',
-      'numero\\s+\\d{1,2}',
-      'number\\s+\\d{1,2}',
-      'vírgula',
-      'virgula',
-      'ponto\\s+e\\s+vírgula',
-      'ponto\\s+e\\s+virgula',
-      'dois\\s+pontos',
-      'ponto\\s+final',
-      'ponto',
-      'ponto\\s+de\\s+interrogação',
-      'ponto\\s+de\\s+interrogacao',
-      'interrogação',
-      'interrogacao',
-      'ponto\\s+de\\s+exclamação',
-      'ponto\\s+de\\s+exclamacao',
-      'exclamação',
-      'exclamacao',
-      'reticências',
-      'reticencias',
-      'abre\\s+par[êe]nteses',
-      'fecha\\s+par[êe]nteses',
-      'abre\\s+aspas',
-      'fecha\\s+aspas',
-      'abre\\s+colchetes?',
-      'fecha\\s+colchetes?',
-      'travess[aã]o',
-    ].join('|'),
-    'i',
+      "nova\\s+linha",
+      "new\\s+line",
+      "bullet\\s+point",
+      "bullet",
+      "t[oó]pico",
+      "topico",
+      "item\\s+\\d{1,2}",
+      "n[uú]mero\\s+\\d{1,2}",
+      "numero\\s+\\d{1,2}",
+      "number\\s+\\d{1,2}",
+      "vírgula",
+      "virgula",
+      "ponto\\s+e\\s+vírgula",
+      "ponto\\s+e\\s+virgula",
+      "dois\\s+pontos",
+      "ponto\\s+final",
+      "ponto",
+      "ponto\\s+de\\s+interrogação",
+      "ponto\\s+de\\s+interrogacao",
+      "interrogação",
+      "interrogacao",
+      "ponto\\s+de\\s+exclamação",
+      "ponto\\s+de\\s+exclamacao",
+      "exclamação",
+      "exclamacao",
+      "reticências",
+      "reticencias",
+      "abre\\s+par[êe]nteses",
+      "fecha\\s+par[êe]nteses",
+      "abre\\s+aspas",
+      "fecha\\s+aspas",
+      "abre\\s+colchetes?",
+      "fecha\\s+colchetes?",
+      "travess[aã]o",
+    ].join("|"),
+    "i",
   );
 }
 
@@ -137,16 +140,16 @@ const FORMAT_COMMAND_HINT_RE = formatCommandHintRegex();
 
 function normalizePunctuationSpacing(value: string) {
   let next = value;
-  next = next.replace(/\s+([,.;:!?])/g, '$1');
-  next = next.replace(/([,.;:!?])(?!\s|\n|$)/g, '$1 ');
-  next = next.replace(/\(\s+/g, '(').replace(/\s+\)/g, ')');
-  next = next.replace(/\[\s+/g, '[').replace(/\s+\]/g, ']');
-  next = next.replace(/\{\s+/g, '{').replace(/\s+\}/g, '}');
-  next = next.replace(/\s*—\s*/g, ' — ');
-  next = next.replace(/\n[ \t]*/g, '\n');
-  next = next.replace(/(^|\n)•(?!\s)/g, '$1• ');
-  next = next.replace(/(^|\n)(\d+\.)\s*/g, '$1$2 ');
-  next = next.replace(/\n{2,}/g, '\n');
+  next = next.replace(/\s+([,.;:!?])/g, "$1");
+  next = next.replace(/([,.;:!?])(?!\s|\n|$)/g, "$1 ");
+  next = next.replace(/\(\s+/g, "(").replace(/\s+\)/g, ")");
+  next = next.replace(/\[\s+/g, "[").replace(/\s+\]/g, "]");
+  next = next.replace(/\{\s+/g, "{").replace(/\s+\}/g, "}");
+  next = next.replace(/\s*—\s*/g, " — ");
+  next = next.replace(/\n[ \t]*/g, "\n");
+  next = next.replace(/(^|\n)•(?!\s)/g, "$1• ");
+  next = next.replace(/(^|\n)(\d+\.)\s*/g, "$1$2 ");
+  next = next.replace(/\n{2,}/g, "\n");
   return normalizeWhitespace(next);
 }
 
@@ -170,7 +173,9 @@ function scoreApproximateMatch(source: string, target: string) {
 function levenshteinDistance(a: string, b: string) {
   const rows = a.length + 1;
   const cols = b.length + 1;
-  const matrix = Array.from({ length: rows }, () => Array<number>(cols).fill(0));
+  const matrix = Array.from({ length: rows }, () =>
+    Array<number>(cols).fill(0),
+  );
 
   for (let row = 0; row < rows; row += 1) matrix[row][0] = row;
   for (let col = 0; col < cols; col += 1) matrix[0][col] = col;
@@ -189,7 +194,11 @@ function levenshteinDistance(a: string, b: string) {
   return matrix[a.length][b.length];
 }
 
-function applyProtectedTerms(value: string, protectedTerms: string[], appliedRules: string[]) {
+function applyProtectedTerms(
+  value: string,
+  protectedTerms: string[],
+  appliedRules: string[],
+) {
   let next = value;
   for (const term of protectedTerms) {
     const normalizedTerm = normalizeWhitespace(term);
@@ -209,16 +218,17 @@ function applyProtectedTerms(value: string, protectedTerms: string[], appliedRul
     const tokens = next.split(/(\s+)/);
     let changed = false;
     for (let index = 0; index < tokens.length; index += 1) {
-      const candidate = tokens[index]?.replace(PUNCT_SYMBOL_RE, '') ?? '';
+      const candidate = tokens[index]?.replace(PUNCT_SYMBOL_RE, "") ?? "";
       if (!candidate) continue;
       if (scoreApproximateMatch(candidate, normalizedTerm) >= 0.84) {
-        tokens[index] = tokens[index]?.replace(candidate, normalizedTerm) ?? normalizedTerm;
+        tokens[index] =
+          tokens[index]?.replace(candidate, normalizedTerm) ?? normalizedTerm;
         changed = true;
       }
     }
     if (changed) {
       appliedRules.push(`protect:fuzzy:${normalizedTerm}`);
-      next = tokens.join('');
+      next = tokens.join("");
     }
   }
   return next;
@@ -227,24 +237,30 @@ function applyProtectedTerms(value: string, protectedTerms: string[], appliedRul
 function applyCanonicalReplacements(
   value: string,
   canonicalTerms: CanonicalTerm[],
-  opts: { appKey?: string | null; profile: PostprocessProfile; appliedRules: string[] },
+  opts: {
+    appKey?: string | null;
+    profile: PostprocessProfile;
+    appliedRules: string[];
+  },
 ) {
   let next = value;
   for (const term of canonicalTerms) {
     if (!term.enabled) continue;
-    if (term.scope === 'app' && term.appKeys?.length) {
+    if (term.scope === "app" && term.appKeys?.length) {
       const normalizedAppKey = opts.appKey?.trim().toLowerCase();
-      if (!normalizedAppKey || !term.appKeys.includes(normalizedAppKey)) continue;
+      if (!normalizedAppKey || !term.appKeys.includes(normalizedAppKey))
+        continue;
     }
-    if (term.confidencePolicy === 'safe-only' && opts.profile === 'aggressive') continue;
+    if (term.confidencePolicy === "safe-only" && opts.profile === "aggressive")
+      continue;
     const target = normalizeWhitespace(term.to);
     if (!target) continue;
-    const alternatives = String(term.from ?? '')
-      .split('|')
+    const alternatives = String(term.from ?? "")
+      .split("|")
       .map((entry) => normalizeWhitespace(entry))
       .filter(Boolean);
     for (const alternative of alternatives) {
-      const hasTerminalBang = target.endsWith('!');
+      const hasTerminalBang = target.endsWith("!");
       const core = escapeRegExp(alternative);
       const boundary = `${WORD_BOUNDARY_LEFT}${core}${WORD_BOUNDARY_RIGHT}`;
       const pattern = hasTerminalBang
@@ -260,118 +276,143 @@ function applyCanonicalReplacements(
   return next;
 }
 
-function applyExplicitFormattingCommands(value: string, appliedRules: string[]) {
+function applyExplicitFormattingCommands(
+  value: string,
+  appliedRules: string[],
+) {
   let next = value;
   if (!FORMAT_COMMAND_HINT_RE.test(next)) {
     return normalizePunctuationSpacing(next);
   }
-  appliedRules.push('format:commands');
-  next = next.replace(commandRegex('nova\\s+linha|new\\s+line'), '\n');
-  next = next.replace(commandRegex('bullet\\s+point|bullet|t[oó]pico|topico'), '\n•');
+  appliedRules.push("format:commands");
+  next = next.replace(commandRegex("nova\\s+linha|new\\s+line"), "\n");
   next = next.replace(
-    commandRegex('(?:item|n[uú]mero|numero|number)\\s+(\\d{1,2})'),
+    commandRegex("bullet\\s+point|bullet|t[oó]pico|topico"),
+    "\n•",
+  );
+  next = next.replace(
+    commandRegex("(?:item|n[uú]mero|numero|number)\\s+(\\d{1,2})"),
     (_entry, n: string) => `\n${n}.`,
   );
 
   // PT-BR punctuation commands (explicit)
-  next = next.replace(commandRegex('vírgula|virgula'), ',');
-  next = next.replace(commandRegex('ponto\\s+e\\s+vírgula|ponto\\s+e\\s+virgula'), ';');
-  next = next.replace(commandRegex('dois\\s+pontos'), ':');
-  next = next.replace(commandRegex('ponto\\s+final'), '.');
+  next = next.replace(commandRegex("vírgula|virgula"), ",");
+  next = next.replace(
+    commandRegex("ponto\\s+e\\s+vírgula|ponto\\s+e\\s+virgula"),
+    ";",
+  );
+  next = next.replace(commandRegex("dois\\s+pontos"), ":");
+  next = next.replace(commandRegex("ponto\\s+final"), ".");
   next = next.replace(
     commandRegex(
-      'interrogação|interrogacao|ponto\\s+de\\s+interrogação|ponto\\s+de\\s+interrogacao',
+      "interrogação|interrogacao|ponto\\s+de\\s+interrogação|ponto\\s+de\\s+interrogacao",
     ),
-    '?',
+    "?",
   );
   next = next.replace(
-    commandRegex('exclamação|exclamacao|ponto\\s+de\\s+exclamação|ponto\\s+de\\s+exclamacao'),
-    '!',
+    commandRegex(
+      "exclamação|exclamacao|ponto\\s+de\\s+exclamação|ponto\\s+de\\s+exclamacao",
+    ),
+    "!",
   );
-  next = next.replace(commandRegex('reticências|reticencias'), '...');
-  next = next.replace(commandRegex('ponto'), '.');
+  next = next.replace(commandRegex("reticências|reticencias"), "...");
+  next = next.replace(commandRegex("ponto"), ".");
 
   // Parentheses / quotes
-  next = next.replace(commandRegex('abre\\s+par[êe]nteses'), '(');
-  next = next.replace(commandRegex('fecha\\s+par[êe]nteses'), ')');
-  next = next.replace(commandRegex('abre\\s+aspas'), '"');
-  next = next.replace(commandRegex('fecha\\s+aspas'), '"');
-  next = next.replace(commandRegex('abre\\s+colchetes?'), '[');
-  next = next.replace(commandRegex('fecha\\s+colchetes?'), ']');
-  next = next.replace(commandRegex('travess[aã]o'), ' — ');
+  next = next.replace(commandRegex("abre\\s+par[êe]nteses"), "(");
+  next = next.replace(commandRegex("fecha\\s+par[êe]nteses"), ")");
+  next = next.replace(commandRegex("abre\\s+aspas"), '"');
+  next = next.replace(commandRegex("fecha\\s+aspas"), '"');
+  next = next.replace(commandRegex("abre\\s+colchetes?"), "[");
+  next = next.replace(commandRegex("fecha\\s+colchetes?"), "]");
+  next = next.replace(commandRegex("travess[aã]o"), " — ");
   return normalizePunctuationSpacing(next);
 }
 
 function applyIntentFormatting(
   value: string,
   intent: TranscriptIntent,
-  language: 'pt-BR' | 'en-US',
+  language: "pt-BR" | "en-US",
   appliedRules: string[],
 ) {
   let next = value;
-  if (intent === 'bullet-list') {
-    const segments = next.includes('\n') ? next.split('\n') : next.split(/\s*(?:;|\|)\s*/);
+  if (intent === "bullet-list") {
+    const segments = next.includes("\n")
+      ? next.split("\n")
+      : next.split(/\s*(?:;|\|)\s*/);
     next = segments
       .map((line) => line.trim())
       .filter(Boolean)
-      .map((line) => `• ${line.replace(/^(?:[-*•]\s*|\d+\.\s*)/, '')}`)
-      .join('\n');
-    appliedRules.push('intent:bullet-list');
+      .map((line) => `• ${line.replace(/^(?:[-*•]\s*|\d+\.\s*)/, "")}`)
+      .join("\n");
+    appliedRules.push("intent:bullet-list");
     return next;
   }
-  if (intent === 'numbered-list') {
-    const segments = next.includes('\n') ? next.split('\n') : next.split(/\s*(?:;|\|)\s*/);
+  if (intent === "numbered-list") {
+    const segments = next.includes("\n")
+      ? next.split("\n")
+      : next.split(/\s*(?:;|\|)\s*/);
     next = segments
       .map((line) => line.trim())
       .filter(Boolean)
-      .map((line, index) => `${index + 1}. ${line.replace(/^(?:[-*•]\s*|\d+\.\s*)/, '')}`)
-      .join('\n');
-    appliedRules.push('intent:numbered-list');
+      .map(
+        (line, index) =>
+          `${index + 1}. ${line.replace(/^(?:[-*•]\s*|\d+\.\s*)/, "")}`,
+      )
+      .join("\n");
+    appliedRules.push("intent:numbered-list");
     return next;
   }
-  if (intent === 'email') {
-    next = next.replace(/\.\s+/g, '.\n\n');
-    if (language === 'pt-BR' && !/^(ol[aá]|prezad)/i.test(next)) {
+  if (intent === "email") {
+    next = next.replace(/\.\s+/g, ".\n\n");
+    if (language === "pt-BR" && !/^(ol[aá]|prezad)/i.test(next)) {
       next = `Olá,\n\n${next}`;
     }
-    if (language === 'en-US' && !/^(hello|hi|dear)/i.test(next)) {
+    if (language === "en-US" && !/^(hello|hi|dear)/i.test(next)) {
       next = `Hello,\n\n${next}`;
     }
-    appliedRules.push('intent:email');
+    appliedRules.push("intent:email");
     return next;
   }
-  if (intent === 'chat') {
-    next = next.replace(/[;:]+/g, ',');
-    appliedRules.push('intent:chat');
+  if (intent === "chat") {
+    next = next.replace(/[;:]+/g, ",");
+    appliedRules.push("intent:chat");
     return next;
   }
-  if (intent === 'technical-note') {
+  if (intent === "technical-note") {
     next = next
-      .replace(/\b(api|json|http|https|sql|sdk|ui|ux)\b/gi, (entry) => entry.toUpperCase())
-      .replace(/\btypescript\b/gi, 'TypeScript')
-      .replace(/\bjavascript\b/gi, 'JavaScript')
-      .replace(/\breact\b/gi, 'React')
-      .replace(/\belectron\b/gi, 'Electron')
-      .replace(/\bazure\b/gi, 'Azure');
-    appliedRules.push('intent:technical-note');
+      .replace(/\b(api|json|http|https|sql|sdk|ui|ux)\b/gi, (entry) =>
+        entry.toUpperCase(),
+      )
+      .replace(/\btypescript\b/gi, "TypeScript")
+      .replace(/\bjavascript\b/gi, "JavaScript")
+      .replace(/\breact\b/gi, "React")
+      .replace(/\belectron\b/gi, "Electron")
+      .replace(/\bazure\b/gi, "Azure");
+    appliedRules.push("intent:technical-note");
     return next;
   }
   return next;
 }
 
 function applyToneProfile(value: string, toneMode: ToneMode) {
-  if (toneMode === 'formal') {
+  if (toneMode === "formal") {
     return value
-      .replace(/\b(vc|vcs)\b/gi, (entry) => (entry.toLowerCase() === 'vcs' ? 'vocês' : 'você'))
-      .replace(/\b(pra)\b/gi, 'para')
-      .replace(/\b(tá)\b/gi, 'está')
-      .replace(/\b(to|tô)\b/gi, 'estou')
-      .replace(/\b(ta)\b/gi, 'está')
-      .replace(/\b(não tá)\b/gi, 'não está')
-      .replace(/\b(cê)\b/gi, 'você');
+      .replace(/\b(vc|vcs)\b/gi, (entry) =>
+        entry.toLowerCase() === "vcs" ? "vocês" : "você",
+      )
+      .replace(/\b(pra)\b/gi, "para")
+      .replace(/\b(tá)\b/gi, "está")
+      .replace(/\b(to|tô)\b/gi, "estou")
+      .replace(/\b(ta)\b/gi, "está")
+      .replace(/\b(não tá)\b/gi, "não está")
+      .replace(/\b(cê)\b/gi, "você");
   }
-  if (toneMode === 'very-casual') {
-    return value.replace(/você/gi, 'vc').replace(/para/gi, 'pra').replace(/está/gi, 'tá');
+  if (toneMode === "very-casual") {
+    return value
+      .replace(/você/gi, "vc")
+      .replace(/para/gi, "pra")
+      .replace(/está/gi, "tá");
   }
   return value;
 }
@@ -381,7 +422,7 @@ function mergeBreathPauseSentenceBreaks(
   intent: TranscriptIntent,
   appliedRules: string[],
 ) {
-  if (!value || intent === 'bullet-list' || intent === 'numbered-list') {
+  if (!value || intent === "bullet-list" || intent === "numbered-list") {
     return value;
   }
 
@@ -412,49 +453,56 @@ function mergeBreathPauseSentenceBreaks(
   );
 
   if (next !== original) {
-    appliedRules.push('punctuation:breath-merge');
+    appliedRules.push("punctuation:breath-merge");
   }
   return next;
 }
 
 function punctuateLine(value: string, toneMode: ToneMode) {
-  if (!value) return '';
+  if (!value) return "";
 
-  if (toneMode === 'very-casual') {
-    return lowerFirstPreserveCase(value).replace(/[.]+$/g, '');
+  if (toneMode === "very-casual") {
+    return lowerFirstPreserveCase(value).replace(/[.]+$/g, "");
   }
 
   const capped = capitalizeFirst(value);
   if (/[.!?…]$/.test(capped)) return capped;
-  if (toneMode === 'formal') return `${capped}.`;
+  if (toneMode === "formal") return `${capped}.`;
   return capped;
 }
 
-function applyFinalPunctuation(value: string, toneMode: ToneMode, intent: TranscriptIntent) {
-  if (!value) return '';
-  if (intent === 'chat' && toneMode !== 'formal') {
+function applyFinalPunctuation(
+  value: string,
+  toneMode: ToneMode,
+  intent: TranscriptIntent,
+) {
+  if (!value) return "";
+  if (intent === "chat" && toneMode !== "formal") {
     return value
-      .split('\n')
+      .split("\n")
       .map((line) => normalizeWhitespace(line))
       .filter(Boolean)
-      .join('\n');
+      .join("\n");
   }
-  if (!value.includes('\n')) return punctuateLine(value, toneMode);
+  if (!value.includes("\n")) return punctuateLine(value, toneMode);
 
   return value
-    .split('\n')
+    .split("\n")
     .map((line) => {
       const trimmed = line.trim();
-      if (!trimmed) return '';
+      if (!trimmed) return "";
       if (/^(•|\d+\.)\s+/.test(trimmed)) return trimmed;
       return punctuateLine(trimmed, toneMode);
     })
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 }
 
-export function applyTranscriptPostprocess(rawText: string, options: TranscriptPostprocessOptions) {
+export function applyTranscriptPostprocess(
+  rawText: string,
+  options: TranscriptPostprocessOptions,
+) {
   return inspectTranscriptPostprocess(rawText, options).finalText;
 }
 
@@ -465,37 +513,52 @@ export function inspectTranscriptPostprocess(
   const normalized = normalizeWhitespace(rawText);
   if (!normalized) {
     return {
-      normalizedText: '',
-      finalText: '',
+      normalizedText: "",
+      finalText: "",
       appliedRules: [],
     };
   }
 
-  const appliedRules: string[] = ['normalize:whitespace'];
-  const withProtected = applyProtectedTerms(normalized, options.protectedTerms ?? [], appliedRules);
-  const withCanonical = applyCanonicalReplacements(withProtected, options.canonicalTerms, {
-    appKey: options.appKey,
-    profile: options.profile ?? 'balanced',
+  const appliedRules: string[] = ["normalize:whitespace"];
+  const withProtected = applyProtectedTerms(
+    normalized,
+    options.protectedTerms ?? [],
     appliedRules,
-  });
+  );
+  const withCanonical = applyCanonicalReplacements(
+    withProtected,
+    options.canonicalTerms,
+    {
+      appKey: options.appKey,
+      profile: options.profile ?? "balanced",
+      appliedRules,
+    },
+  );
   const withCommands =
     options.formatCommandsEnabled === false
       ? withCanonical
       : applyExplicitFormattingCommands(withCanonical, appliedRules);
-  const intent = options.intent ?? 'free-text';
+  const intent = options.intent ?? "free-text";
   const withIntent = normalizeWhitespace(
-    applyIntentFormatting(withCommands, intent, options.language ?? 'pt-BR', appliedRules),
+    applyIntentFormatting(
+      withCommands,
+      intent,
+      options.language ?? "pt-BR",
+      appliedRules,
+    ),
   );
   const withBreathMerge = normalizeWhitespace(
     mergeBreathPauseSentenceBreaks(withIntent, intent, appliedRules),
   );
-  const toned = normalizeWhitespace(applyToneProfile(withBreathMerge, options.toneMode));
+  const toned = normalizeWhitespace(
+    applyToneProfile(withBreathMerge, options.toneMode),
+  );
   if (toned !== withBreathMerge) {
     appliedRules.push(`tone:${options.toneMode}`);
   }
   const finalText = applyFinalPunctuation(toned, options.toneMode, intent);
   if (finalText !== toned) {
-    appliedRules.push('final:punctuation');
+    appliedRules.push("final:punctuation");
   }
   return {
     normalizedText: normalized,

@@ -3,4 +3,4 @@ export {
   type CanonicalTerm,
   type ToneMode,
   type TranscriptPostprocessOptions,
-} from '../../electron/transcript-postprocess';
+} from "../../electron/transcript-postprocess";

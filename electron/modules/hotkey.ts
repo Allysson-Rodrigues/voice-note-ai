@@ -1,8 +1,11 @@
-import { globalShortcut } from 'electron';
-import { randomUUID } from 'node:crypto';
-import { hotkeyLabelFromAccelerator, parseHoldHotkeyChord } from '../hotkey-config.js';
+import { globalShortcut } from "electron";
+import { randomUUID } from "node:crypto";
+import {
+  hotkeyLabelFromAccelerator,
+  parseHoldHotkeyChord,
+} from "../hotkey-config.js";
 
-type HotkeyMode = 'hold' | 'toggle-primary' | 'toggle-fallback' | 'unavailable';
+type HotkeyMode = "hold" | "toggle-primary" | "toggle-fallback" | "unavailable";
 type RuntimeInfo = {
   hotkeyLabel: string;
   hotkeyMode: HotkeyMode;
@@ -12,7 +15,13 @@ type RuntimeInfo = {
 };
 
 type HudState = {
-  state: 'idle' | 'listening' | 'finalizing' | 'injecting' | 'success' | 'error';
+  state:
+    | "idle"
+    | "listening"
+    | "finalizing"
+    | "injecting"
+    | "success"
+    | "error";
   message?: string;
 };
 
@@ -25,8 +34,14 @@ type UiohookKeyEvent = {
 };
 
 type UiohookInstance = {
-  on: (event: 'keydown' | 'keyup' | 'error', listener: (payload: unknown) => void) => void;
-  off?: (event: 'keydown' | 'keyup' | 'error', listener: (payload: unknown) => void) => void;
+  on: (
+    event: "keydown" | "keyup" | "error",
+    listener: (payload: unknown) => void,
+  ) => void;
+  off?: (
+    event: "keydown" | "keyup" | "error",
+    listener: (payload: unknown) => void,
+  ) => void;
   start: () => void;
   stop?: () => void;
 };
@@ -38,10 +53,10 @@ type UiohookImport = {
 
 function resolveUiohookInstance(mod: UiohookImport): UiohookInstance | null {
   const defaultExport = mod.default;
-  if (defaultExport && 'on' in defaultExport && 'start' in defaultExport) {
+  if (defaultExport && "on" in defaultExport && "start" in defaultExport) {
     return defaultExport;
   }
-  if (defaultExport && 'uIOhook' in defaultExport) {
+  if (defaultExport && "uIOhook" in defaultExport) {
     return defaultExport.uIOhook ?? null;
   }
   return mod.uIOhook ?? null;
@@ -58,7 +73,10 @@ type HotkeyServiceOptions = {
   refreshCaptureBlockedReason: () => string | null | undefined;
   setHudState: (state: HudState) => void;
   emitAppError: (message: string) => void;
-  sendCaptureStart: (payload: { sessionId: string; sttWarmStart: boolean }) => void;
+  sendCaptureStart: (payload: {
+    sessionId: string;
+    sttWarmStart: boolean;
+  }) => void;
   sendCaptureStop: (payload: { sessionId: string }) => void;
   sendSttError: (payload: { sessionId: string; message: string }) => void;
   hasActiveSession: () => boolean;
@@ -73,7 +91,10 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
   let stopHoldHook: null | (() => void) = null;
   let holdHookRecoveryTimer: NodeJS.Timeout | null = null;
 
-  function resolveHotkeys(overrides?: { primaryHotkey?: string; fallbackHotkey?: string }) {
+  function resolveHotkeys(overrides?: {
+    primaryHotkey?: string;
+    fallbackHotkey?: string;
+  }) {
     return {
       primaryHotkey: overrides?.primaryHotkey ?? options.getPrimaryHotkey(),
       fallbackHotkey: overrides?.fallbackHotkey ?? options.getFallbackHotkey(),
@@ -83,7 +104,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
   function reportHotkeyFailure(message: string) {
     options.setRuntimeBlocked(message);
     options.emitAppError(message);
-    options.setHudState({ state: 'error', message });
+    options.setHudState({ state: "error", message });
     return { ok: false as const, message };
   }
 
@@ -94,7 +115,12 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
   }
 
   function scheduleHoldHookRecovery() {
-    if (process.platform !== 'win32' || !options.holdToTalkEnabled || holdHookRecoveryTimer) return;
+    if (
+      process.platform !== "win32" ||
+      !options.holdToTalkEnabled ||
+      holdHookRecoveryTimer
+    )
+      return;
 
     holdHookRecoveryTimer = setInterval(() => {
       if (stopHoldHook || options.isQuitting()) return;
@@ -104,7 +130,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
           if (!stopper) return;
           stopHoldHook = stopper;
           options.refreshCaptureBlockedReason();
-          options.setHudState({ state: 'idle' });
+          options.setHudState({ state: "idle" });
           stopHoldHookRecovery();
         })
         .catch(() => {
@@ -116,7 +142,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
   function onSessionStartError(sessionId: string, error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     options.sendSttError({ sessionId, message });
-    options.setHudState({ state: 'error', message });
+    options.setHudState({ state: "error", message });
     options.emitAppError(message);
     options.sendCaptureStop({ sessionId });
   }
@@ -124,7 +150,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
   function startSessionFromHotkey() {
     const blockedReason = options.refreshCaptureBlockedReason();
     if (blockedReason) {
-      options.setHudState({ state: 'error', message: blockedReason });
+      options.setHudState({ state: "error", message: blockedReason });
       options.emitAppError(blockedReason);
       return;
     }
@@ -145,31 +171,37 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
       });
 
     options.sendCaptureStart({ sessionId, sttWarmStart: true });
-    options.setHudState({ state: 'listening' });
+    options.setHudState({ state: "listening" });
   }
 
   function registerToggleHotkey(hotkeys = resolveHotkeys()) {
     globalShortcut.unregisterAll();
     const { primaryHotkey, fallbackHotkey } = hotkeys;
 
-    const primaryOk = globalShortcut.register(primaryHotkey, startSessionFromHotkey);
+    const primaryOk = globalShortcut.register(
+      primaryHotkey,
+      startSessionFromHotkey,
+    );
     if (primaryOk) {
       options.updateRuntimeInfo({
         ...options.getRuntimeInfo(),
         hotkeyLabel: hotkeyLabelFromAccelerator(primaryHotkey),
-        hotkeyMode: 'toggle-primary',
+        hotkeyMode: "toggle-primary",
         holdToTalkActive: false,
         holdRequired: false,
       });
       return { ok: true as const };
     }
 
-    const fallbackOk = globalShortcut.register(fallbackHotkey, startSessionFromHotkey);
+    const fallbackOk = globalShortcut.register(
+      fallbackHotkey,
+      startSessionFromHotkey,
+    );
     if (fallbackOk) {
       options.updateRuntimeInfo({
         ...options.getRuntimeInfo(),
         hotkeyLabel: hotkeyLabelFromAccelerator(fallbackHotkey),
-        hotkeyMode: 'toggle-fallback',
+        hotkeyMode: "toggle-fallback",
         holdToTalkActive: false,
         holdRequired: false,
       });
@@ -180,13 +212,15 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
     return reportHotkeyFailure(errorMessage);
   }
 
-  async function tryStartHoldToTalkHook(primaryHotkey = options.getPrimaryHotkey()) {
+  async function tryStartHoldToTalkHook(
+    primaryHotkey = options.getPrimaryHotkey(),
+  ) {
     if (!options.holdToTalkEnabled) return null;
-    if (process.platform !== 'win32') return null;
+    if (process.platform !== "win32") return null;
 
     let uiohookMod: UiohookImport;
     try {
-      uiohookMod = (await import('uiohook-napi')) as UiohookImport;
+      uiohookMod = (await import("uiohook-napi")) as UiohookImport;
     } catch {
       return null;
     }
@@ -216,7 +250,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
       if (chordActive) {
         const blockedReason = options.refreshCaptureBlockedReason();
         if (blockedReason) {
-          options.setHudState({ state: 'error', message: blockedReason });
+          options.setHudState({ state: "error", message: blockedReason });
           options.emitAppError(blockedReason);
           return;
         }
@@ -232,7 +266,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
           });
 
         options.sendCaptureStart({ sessionId, sttWarmStart: true });
-        options.setHudState({ state: 'listening' });
+        options.setHudState({ state: "listening" });
         return;
       }
 
@@ -243,17 +277,22 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
 
     const onKeyDown = (event: unknown) => {
       const keyEvent = event as UiohookKeyEvent;
-      if (typeof keyEvent.keycode === 'number') pressed.add(keyEvent.keycode);
-      ctrlDown = Boolean(keyEvent.ctrlKey) || pressed.has(29) || pressed.has(3613);
-      altDown = Boolean(keyEvent.altKey) || pressed.has(56) || pressed.has(3640);
-      shiftDown = Boolean(keyEvent.shiftKey) || pressed.has(42) || pressed.has(54);
-      metaDown = Boolean(keyEvent.metaKey) || pressed.has(3675) || pressed.has(3676);
+      if (typeof keyEvent.keycode === "number") pressed.add(keyEvent.keycode);
+      ctrlDown =
+        Boolean(keyEvent.ctrlKey) || pressed.has(29) || pressed.has(3613);
+      altDown =
+        Boolean(keyEvent.altKey) || pressed.has(56) || pressed.has(3640);
+      shiftDown =
+        Boolean(keyEvent.shiftKey) || pressed.has(42) || pressed.has(54);
+      metaDown =
+        Boolean(keyEvent.metaKey) || pressed.has(3675) || pressed.has(3676);
       recomputeChordActive();
     };
 
     const onKeyUp = (event: unknown) => {
       const keyEvent = event as UiohookKeyEvent;
-      if (typeof keyEvent.keycode === 'number') pressed.delete(keyEvent.keycode);
+      if (typeof keyEvent.keycode === "number")
+        pressed.delete(keyEvent.keycode);
       ctrlDown = Boolean(keyEvent.ctrlKey);
       altDown = Boolean(keyEvent.altKey);
       shiftDown = Boolean(keyEvent.shiftKey);
@@ -262,26 +301,27 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
     };
 
     const onHookError = (error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error ?? 'unknown');
+      const message =
+        error instanceof Error ? error.message : String(error ?? "unknown");
       const errorMessage = `Hook global falhou: ${message}`;
       stopHoldHook = null;
       options.emitAppError(errorMessage);
       options.setRuntimeBlocked(errorMessage);
-      options.setHudState({ state: 'error', message: errorMessage });
+      options.setHudState({ state: "error", message: errorMessage });
       scheduleHoldHookRecovery();
     };
 
-    uIOhook.on('keydown', onKeyDown);
-    uIOhook.on('keyup', onKeyUp);
-    if (typeof uIOhook.on === 'function') {
-      uIOhook.on('error', onHookError);
+    uIOhook.on("keydown", onKeyDown);
+    uIOhook.on("keyup", onKeyUp);
+    if (typeof uIOhook.on === "function") {
+      uIOhook.on("error", onHookError);
     }
     uIOhook.start();
 
     options.updateRuntimeInfo({
       ...options.getRuntimeInfo(),
       hotkeyLabel: hotkeyLabelFromAccelerator(chord.accelerator),
-      hotkeyMode: 'hold',
+      hotkeyMode: "hold",
       holdToTalkActive: true,
       holdRequired: true,
     });
@@ -290,10 +330,10 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
 
     return () => {
       try {
-        if (typeof uIOhook.off === 'function') {
-          uIOhook.off('keydown', onKeyDown);
-          uIOhook.off('keyup', onKeyUp);
-          uIOhook.off('error', onHookError);
+        if (typeof uIOhook.off === "function") {
+          uIOhook.off("keydown", onKeyDown);
+          uIOhook.off("keyup", onKeyUp);
+          uIOhook.off("error", onHookError);
         }
         if (uIOhook.stop) uIOhook.stop();
       } catch {
@@ -303,23 +343,29 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
   }
 
   async function retryHoldHook() {
-    if (process.platform !== 'win32') {
-      return { ok: false, message: 'Recuperacao de hook e suportada apenas no Windows.' };
+    if (process.platform !== "win32") {
+      return {
+        ok: false,
+        message: "Recuperacao de hook e suportada apenas no Windows.",
+      };
     }
     if (!options.holdToTalkEnabled) {
-      return { ok: false, message: 'O modo segurar para falar esta desativado.' };
+      return {
+        ok: false,
+        message: "O modo segurar para falar esta desativado.",
+      };
     }
     if (stopHoldHook) {
       options.refreshCaptureBlockedReason();
-      return { ok: true, message: 'Hook global ja esta ativo.' };
+      return { ok: true, message: "Hook global ja esta ativo." };
     }
 
     try {
       const stopper = await tryStartHoldToTalkHook();
       if (!stopper) {
-        const message = 'Falha ao inicializar hook global (uiohook-napi).';
+        const message = "Falha ao inicializar hook global (uiohook-napi).";
         options.setRuntimeBlocked(message);
-        options.setHudState({ state: 'error', message });
+        options.setHudState({ state: "error", message });
         options.emitAppError(message);
         scheduleHoldHookRecovery();
         return { ok: false, message };
@@ -327,13 +373,13 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
 
       stopHoldHook = stopper;
       options.refreshCaptureBlockedReason();
-      options.setHudState({ state: 'idle' });
+      options.setHudState({ state: "idle" });
       stopHoldHookRecovery();
-      return { ok: true, message: 'Hook global recuperado com sucesso.' };
+      return { ok: true, message: "Hook global recuperado com sucesso." };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       options.setRuntimeBlocked(message);
-      options.setHudState({ state: 'error', message });
+      options.setHudState({ state: "error", message });
       options.emitAppError(message);
       scheduleHoldHookRecovery();
       return { ok: false, message };
@@ -360,7 +406,7 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
   }
 
   function validateHotkeyConfiguration(hotkeys = resolveHotkeys()) {
-    if (process.platform === 'win32' && options.holdToTalkEnabled) {
+    if (process.platform === "win32" && options.holdToTalkEnabled) {
       try {
         parseHoldHotkeyChord(hotkeys.primaryHotkey);
       } catch (error) {
@@ -374,7 +420,10 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
     return { ok: true as const };
   }
 
-  async function reloadHotkeys(overrides?: { primaryHotkey?: string; fallbackHotkey?: string }) {
+  async function reloadHotkeys(overrides?: {
+    primaryHotkey?: string;
+    fallbackHotkey?: string;
+  }) {
     const hotkeys = resolveHotkeys(overrides);
     const validation = validateHotkeyConfiguration(hotkeys);
     if (!validation.ok) {
@@ -383,9 +432,10 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
 
     stop();
 
-    if (process.platform === 'win32') {
+    if (process.platform === "win32") {
       if (!options.holdToTalkEnabled) {
-        const message = 'PTT indisponivel: o modo segurar para falar esta desativado.';
+        const message =
+          "PTT indisponivel: o modo segurar para falar esta desativado.";
         return reportHotkeyFailure(message);
       }
 
@@ -393,14 +443,15 @@ export function createHotkeyService(options: HotkeyServiceOptions) {
         const stopper = await tryStartHoldToTalkHook(hotkeys.primaryHotkey);
         setStopHoldHook(stopper);
         if (stopper) {
-          options.setHudState({ state: 'idle' });
+          options.setHudState({ state: "idle" });
           return { ok: true as const };
         }
       } catch {
         setStopHoldHook(null);
       }
 
-      const message = 'PTT indisponivel: hook global nao carregou (uiohook-napi).';
+      const message =
+        "PTT indisponivel: hook global nao carregou (uiohook-napi).";
       reportHotkeyFailure(message);
       scheduleHoldHookRecovery();
       return { ok: false as const, message };

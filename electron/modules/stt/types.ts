@@ -11,7 +11,7 @@ export interface SttProviderEvents {
 }
 
 export interface SttStartOptions {
-  dualLanguageStrategy?: 'parallel' | 'fallback-on-low-confidence';
+  dualLanguageStrategy?: "parallel" | "fallback-on-low-confidence";
 }
 
 export interface SttProvider {

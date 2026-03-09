@@ -1,8 +1,11 @@
 export function normalizeDictionaryTerm(value: string): string {
-  return value.replace(/\s+/g, ' ').trim();
+  return value.replace(/\s+/g, " ").trim();
 }
 
-export function mergeUniquePhrases(envValues: string[], dictionaryValues: string[]): string[] {
+export function mergeUniquePhrases(
+  envValues: string[],
+  dictionaryValues: string[],
+): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
 

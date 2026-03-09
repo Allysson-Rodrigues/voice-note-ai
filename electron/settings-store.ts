@@ -1,41 +1,51 @@
-import { normalizeHotkeyAccelerator } from './hotkey-config.js';
+import { normalizeHotkeyAccelerator } from "./hotkey-config.js";
 import {
   quarantineFile,
   readTextFilePair,
   unwrapStoreEnvelope,
   wrapStoreEnvelope,
   writeTextFileAtomic,
-} from './store-utils.js';
+} from "./store-utils.js";
 
-export type ToneMode = 'formal' | 'casual' | 'very-casual';
-export type LanguageMode = 'pt-BR' | 'en-US' | 'dual';
-export type SttProvider = 'azure';
-export type HistoryStorageMode = 'plain' | 'encrypted';
-export type PostprocessProfile = 'safe' | 'balanced' | 'aggressive';
-export type DualLanguageStrategy = 'parallel' | 'fallback-on-low-confidence';
-export type RewriteMode = 'off' | 'safe' | 'aggressive';
-export type LowConfidencePolicy = 'paste' | 'copy-only' | 'review';
-export type AppProfileDomain = 'general' | 'work' | 'support' | 'medical' | 'legal' | 'custom';
+export type ToneMode = "formal" | "casual" | "very-casual";
+export type LanguageMode = "pt-BR" | "en-US" | "dual";
+export type SttProvider = "azure";
+export type HistoryStorageMode = "plain" | "encrypted";
+export type PostprocessProfile = "safe" | "balanced" | "aggressive";
+export type DualLanguageStrategy = "parallel" | "fallback-on-low-confidence";
+export type RewriteMode = "off" | "safe" | "aggressive";
+export type LowConfidencePolicy = "paste" | "copy-only" | "review";
+export type AppProfileDomain =
+  | "general"
+  | "work"
+  | "support"
+  | "medical"
+  | "legal"
+  | "custom";
 export type TranscriptFormatStyle =
-  | 'message'
-  | 'paragraph'
-  | 'bullet-list'
-  | 'email'
-  | 'notes'
-  | 'technical-note';
+  | "message"
+  | "paragraph"
+  | "bullet-list"
+  | "email"
+  | "notes"
+  | "technical-note";
 export type CanonicalTerm = {
   from: string;
   to: string;
   enabled: boolean;
-  scope?: 'global' | 'app' | 'language';
+  scope?: "global" | "app" | "language";
   appKeys?: string[];
-  confidencePolicy?: 'always' | 'safe-only';
+  confidencePolicy?: "always" | "safe-only";
 };
-export type InjectionMethod = 'target-handle' | 'foreground-handle' | 'ctrl-v' | 'shift-insert';
+export type InjectionMethod =
+  | "target-handle"
+  | "foreground-handle"
+  | "ctrl-v"
+  | "shift-insert";
 export type InjectionProfiles = Record<string, InjectionMethod>;
 export type AppProfile = {
   injectionMethod?: InjectionMethod;
-  languageBias?: 'pt-BR' | 'en-US' | 'mixed';
+  languageBias?: "pt-BR" | "en-US" | "mixed";
   postprocessProfile?: PostprocessProfile;
   domain?: AppProfileDomain;
   extraPhrases?: string[];
@@ -74,19 +84,23 @@ export type AppSettings = {
 };
 
 export const DEFAULT_CANONICAL_TERMS: CanonicalTerm[] = [
-  { from: 'work space|workspace|work-space', to: 'Workspace', enabled: true },
-  { from: 'anti gravity|anti-gravity|antigravity', to: 'Antigravity', enabled: true },
-  { from: 'googel|gogle|google', to: 'Google', enabled: true },
-  { from: 'ei|hey', to: 'Hey!', enabled: true },
+  { from: "work space|workspace|work-space", to: "Workspace", enabled: true },
+  {
+    from: "anti gravity|anti-gravity|antigravity",
+    to: "Antigravity",
+    enabled: true,
+  },
+  { from: "googel|gogle|google", to: "Google", enabled: true },
+  { from: "ei|hey", to: "Hey!", enabled: true },
 ];
 
 const DEFAULT_SETTINGS: AppSettings = {
-  hotkeyPrimary: 'CommandOrControl+Super',
-  hotkeyFallback: 'CommandOrControl+Super+Space',
+  hotkeyPrimary: "CommandOrControl+Super",
+  hotkeyFallback: "CommandOrControl+Super+Space",
   autoPasteEnabled: true,
-  toneMode: 'casual',
-  languageMode: 'pt-BR',
-  sttProvider: 'azure',
+  toneMode: "casual",
+  languageMode: "pt-BR",
+  sttProvider: "azure",
   extraPhrases: [],
   canonicalTerms: DEFAULT_CANONICAL_TERMS,
   stopGraceMs: 200,
@@ -96,26 +110,26 @@ const DEFAULT_SETTINGS: AppSettings = {
   historyRetentionDays: 30,
   injectionProfiles: {},
   privacyMode: false,
-  historyStorageMode: 'plain',
-  postprocessProfile: 'balanced',
-  dualLanguageStrategy: 'fallback-on-low-confidence',
+  historyStorageMode: "plain",
+  postprocessProfile: "balanced",
+  dualLanguageStrategy: "fallback-on-low-confidence",
   rewriteEnabled: true,
-  rewriteMode: 'safe',
+  rewriteMode: "safe",
   intentDetectionEnabled: true,
   protectedTerms: [],
-  lowConfidencePolicy: 'paste',
+  lowConfidencePolicy: "paste",
   adaptiveLearningEnabled: true,
   appProfiles: {},
 };
 
 function clampInt(value: unknown, min: number, max: number, fallback: number) {
-  const n = typeof value === 'number' ? value : Number(value);
+  const n = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.round(n)));
 }
 
 function normalizePhrase(value: string) {
-  return value.replace(/\s+/g, ' ').trim();
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function parsePhrases(raw: unknown): string[] {
@@ -123,7 +137,7 @@ function parsePhrases(raw: unknown): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const item of raw) {
-    if (typeof item !== 'string') continue;
+    if (typeof item !== "string") continue;
     const phrase = normalizePhrase(item);
     if (!phrase) continue;
     const key = phrase.toLocaleLowerCase();
@@ -139,12 +153,16 @@ function parseCanonicalTerms(raw: unknown): CanonicalTerm[] {
   const out: CanonicalTerm[] = [];
   const seen = new Set<string>();
   for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
+    if (!item || typeof item !== "object") continue;
     const from = normalizePhrase(
-      typeof (item as { from?: unknown }).from === 'string' ? (item as { from: string }).from : '',
+      typeof (item as { from?: unknown }).from === "string"
+        ? (item as { from: string }).from
+        : "",
     );
     const to = normalizePhrase(
-      typeof (item as { to?: unknown }).to === 'string' ? (item as { to: string }).to : '',
+      typeof (item as { to?: unknown }).to === "string"
+        ? (item as { to: string }).to
+        : "",
     );
     if (!from || !to) continue;
     const key = `${from.toLocaleLowerCase()}=>${to.toLocaleLowerCase()}`;
@@ -155,21 +173,22 @@ function parseCanonicalTerms(raw: unknown): CanonicalTerm[] {
       to,
       enabled: (item as { enabled?: unknown }).enabled !== false,
       scope:
-        (item as { scope?: unknown }).scope === 'app' ||
-        (item as { scope?: unknown }).scope === 'language'
-          ? ((item as { scope: CanonicalTerm['scope'] }).scope ?? 'global')
-          : 'global',
+        (item as { scope?: unknown }).scope === "app" ||
+        (item as { scope?: unknown }).scope === "language"
+          ? ((item as { scope: CanonicalTerm["scope"] }).scope ?? "global")
+          : "global",
       appKeys: Array.isArray((item as { appKeys?: unknown }).appKeys)
         ? ((item as { appKeys: unknown[] }).appKeys ?? [])
-            .filter((entry): entry is string => typeof entry === 'string')
+            .filter((entry): entry is string => typeof entry === "string")
             .map((entry) => normalizePhrase(entry).toLocaleLowerCase())
             .filter(Boolean)
             .slice(0, 20)
         : undefined,
       confidencePolicy:
-        (item as { confidencePolicy?: unknown }).confidencePolicy === 'safe-only'
-          ? 'safe-only'
-          : 'always',
+        (item as { confidencePolicy?: unknown }).confidencePolicy ===
+        "safe-only"
+          ? "safe-only"
+          : "always",
     });
   }
   return out;
@@ -177,10 +196,10 @@ function parseCanonicalTerms(raw: unknown): CanonicalTerm[] {
 
 function parseInjectionMethod(value: unknown): InjectionMethod | null {
   if (
-    value === 'target-handle' ||
-    value === 'foreground-handle' ||
-    value === 'ctrl-v' ||
-    value === 'shift-insert'
+    value === "target-handle" ||
+    value === "foreground-handle" ||
+    value === "ctrl-v" ||
+    value === "shift-insert"
   ) {
     return value;
   }
@@ -188,7 +207,7 @@ function parseInjectionMethod(value: unknown): InjectionMethod | null {
 }
 
 function parseInjectionProfiles(raw: unknown): InjectionProfiles {
-  if (!raw || typeof raw !== 'object') return {};
+  if (!raw || typeof raw !== "object") return {};
   const input = raw as Record<string, unknown>;
   const out: InjectionProfiles = {};
 
@@ -204,11 +223,11 @@ function parseInjectionProfiles(raw: unknown): InjectionProfiles {
 }
 
 function parseSttProvider(value: unknown): SttProvider {
-  return 'azure';
+  return "azure";
 }
 
 function parseHotkeyAccelerator(value: unknown, fallback: string) {
-  if (typeof value !== 'string' || !value.trim()) return fallback;
+  if (typeof value !== "string" || !value.trim()) return fallback;
   try {
     return normalizeHotkeyAccelerator(value);
   } catch {
@@ -217,46 +236,48 @@ function parseHotkeyAccelerator(value: unknown, fallback: string) {
 }
 
 function parseAppProfiles(raw: unknown): AppProfiles {
-  if (!raw || typeof raw !== 'object') return {};
+  if (!raw || typeof raw !== "object") return {};
   const input = raw as Record<string, unknown>;
   const out: AppProfiles = {};
   for (const [key, value] of Object.entries(input)) {
     const appKey = normalizePhrase(key).toLocaleLowerCase();
-    if (!appKey || !value || typeof value !== 'object') continue;
+    if (!appKey || !value || typeof value !== "object") continue;
     const item = value as Record<string, unknown>;
     const injectionMethod = parseInjectionMethod(item.injectionMethod);
     const languageBias =
-      item.languageBias === 'pt-BR' ||
-      item.languageBias === 'en-US' ||
-      item.languageBias === 'mixed'
+      item.languageBias === "pt-BR" ||
+      item.languageBias === "en-US" ||
+      item.languageBias === "mixed"
         ? item.languageBias
         : undefined;
     const postprocessProfile =
-      item.postprocessProfile === 'safe' ||
-      item.postprocessProfile === 'balanced' ||
-      item.postprocessProfile === 'aggressive'
+      item.postprocessProfile === "safe" ||
+      item.postprocessProfile === "balanced" ||
+      item.postprocessProfile === "aggressive"
         ? item.postprocessProfile
         : undefined;
     const domain =
-      item.domain === 'general' ||
-      item.domain === 'work' ||
-      item.domain === 'support' ||
-      item.domain === 'medical' ||
-      item.domain === 'legal' ||
-      item.domain === 'custom'
+      item.domain === "general" ||
+      item.domain === "work" ||
+      item.domain === "support" ||
+      item.domain === "medical" ||
+      item.domain === "legal" ||
+      item.domain === "custom"
         ? item.domain
         : undefined;
     const formatStyle =
-      item.formatStyle === 'message' ||
-      item.formatStyle === 'paragraph' ||
-      item.formatStyle === 'bullet-list' ||
-      item.formatStyle === 'email' ||
-      item.formatStyle === 'notes' ||
-      item.formatStyle === 'technical-note'
+      item.formatStyle === "message" ||
+      item.formatStyle === "paragraph" ||
+      item.formatStyle === "bullet-list" ||
+      item.formatStyle === "email" ||
+      item.formatStyle === "notes" ||
+      item.formatStyle === "technical-note"
         ? item.formatStyle
         : undefined;
     const rewriteEnabled =
-      typeof item.rewriteEnabled === 'boolean' ? item.rewriteEnabled : undefined;
+      typeof item.rewriteEnabled === "boolean"
+        ? item.rewriteEnabled
+        : undefined;
     const extraPhrases = parsePhrases(item.extraPhrases);
     const protectedTerms = parsePhrases(item.protectedTerms);
     out[appKey] = {
@@ -274,48 +295,74 @@ function parseAppProfiles(raw: unknown): AppProfiles {
 }
 
 function parseSettings(raw: unknown): AppSettings {
-  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS };
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_SETTINGS };
   const obj = raw as Partial<AppSettings>;
 
   const toneMode: ToneMode =
-    obj.toneMode === 'formal'
-      ? 'formal'
-      : obj.toneMode === 'very-casual'
-        ? 'very-casual'
-        : 'casual';
+    obj.toneMode === "formal"
+      ? "formal"
+      : obj.toneMode === "very-casual"
+        ? "very-casual"
+        : "casual";
   const languageMode: LanguageMode =
-    obj.languageMode === 'en-US' ? 'en-US' : obj.languageMode === 'dual' ? 'dual' : 'pt-BR';
+    obj.languageMode === "en-US"
+      ? "en-US"
+      : obj.languageMode === "dual"
+        ? "dual"
+        : "pt-BR";
   const historyStorageMode: HistoryStorageMode =
-    obj.historyStorageMode === 'encrypted' ? 'encrypted' : 'plain';
+    obj.historyStorageMode === "encrypted" ? "encrypted" : "plain";
   const postprocessProfile: PostprocessProfile =
-    obj.postprocessProfile === 'safe'
-      ? 'safe'
-      : obj.postprocessProfile === 'aggressive'
-        ? 'aggressive'
-        : 'balanced';
+    obj.postprocessProfile === "safe"
+      ? "safe"
+      : obj.postprocessProfile === "aggressive"
+        ? "aggressive"
+        : "balanced";
   const dualLanguageStrategy: DualLanguageStrategy =
-    obj.dualLanguageStrategy === 'parallel' ? 'parallel' : 'fallback-on-low-confidence';
+    obj.dualLanguageStrategy === "parallel"
+      ? "parallel"
+      : "fallback-on-low-confidence";
   const rewriteMode: RewriteMode =
-    obj.rewriteMode === 'off' ? 'off' : obj.rewriteMode === 'aggressive' ? 'aggressive' : 'safe';
+    obj.rewriteMode === "off"
+      ? "off"
+      : obj.rewriteMode === "aggressive"
+        ? "aggressive"
+        : "safe";
   const lowConfidencePolicy: LowConfidencePolicy =
-    obj.lowConfidencePolicy === 'paste'
-      ? 'paste'
-      : obj.lowConfidencePolicy === 'copy-only'
-        ? 'copy-only'
-        : 'review';
+    obj.lowConfidencePolicy === "paste"
+      ? "paste"
+      : obj.lowConfidencePolicy === "copy-only"
+        ? "copy-only"
+        : "review";
 
   return {
-    hotkeyPrimary: parseHotkeyAccelerator(obj.hotkeyPrimary, DEFAULT_SETTINGS.hotkeyPrimary),
-    hotkeyFallback: parseHotkeyAccelerator(obj.hotkeyFallback, DEFAULT_SETTINGS.hotkeyFallback),
+    hotkeyPrimary: parseHotkeyAccelerator(
+      obj.hotkeyPrimary,
+      DEFAULT_SETTINGS.hotkeyPrimary,
+    ),
+    hotkeyFallback: parseHotkeyAccelerator(
+      obj.hotkeyFallback,
+      DEFAULT_SETTINGS.hotkeyFallback,
+    ),
     autoPasteEnabled: obj.autoPasteEnabled === true,
     toneMode,
     languageMode,
     sttProvider: parseSttProvider(obj.sttProvider),
     extraPhrases: parsePhrases(obj.extraPhrases),
     canonicalTerms: parseCanonicalTerms(obj.canonicalTerms),
-    stopGraceMs: clampInt(obj.stopGraceMs, 0, 2000, DEFAULT_SETTINGS.stopGraceMs),
+    stopGraceMs: clampInt(
+      obj.stopGraceMs,
+      0,
+      2000,
+      DEFAULT_SETTINGS.stopGraceMs,
+    ),
     formatCommandsEnabled: obj.formatCommandsEnabled !== false,
-    maxSessionSeconds: clampInt(obj.maxSessionSeconds, 30, 600, DEFAULT_SETTINGS.maxSessionSeconds),
+    maxSessionSeconds: clampInt(
+      obj.maxSessionSeconds,
+      30,
+      600,
+      DEFAULT_SETTINGS.maxSessionSeconds,
+    ),
     historyEnabled: obj.historyEnabled !== false,
     historyRetentionDays: clampInt(
       obj.historyRetentionDays,
@@ -370,7 +417,7 @@ export class SettingsStore {
     }
 
     if (pair.primary != null) {
-      await quarantineFile(this.filePath, 'corrupt');
+      await quarantineFile(this.filePath, "corrupt");
     }
 
     await this.persist(this.cached);
@@ -396,7 +443,10 @@ export class SettingsStore {
   }
 
   private async persist(settings: AppSettings): Promise<void> {
-    await writeTextFileAtomic(this.filePath, JSON.stringify(wrapStoreEnvelope(settings), null, 2));
+    await writeTextFileAtomic(
+      this.filePath,
+      JSON.stringify(wrapStoreEnvelope(settings), null, 2),
+    );
   }
 
   private tryParse(content: string | null) {
@@ -406,7 +456,10 @@ export class SettingsStore {
       const raw = JSON.parse(content);
       const envelope = unwrapStoreEnvelope<unknown>(raw);
       return {
-        settings: parseSettings({ ...this.cached, ...((envelope.data ?? {}) as object) }),
+        settings: parseSettings({
+          ...this.cached,
+          ...((envelope.data ?? {}) as object),
+        }),
         needsMigration: envelope.version < 1,
       };
     } catch {

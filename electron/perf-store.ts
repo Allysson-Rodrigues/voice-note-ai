@@ -4,7 +4,7 @@ import {
   unwrapStoreEnvelope,
   wrapStoreEnvelope,
   writeTextFileAtomic,
-} from './store-utils.js';
+} from "./store-utils.js";
 
 export type PerfSample = {
   sessionId: string;
@@ -17,7 +17,7 @@ export type PerfSample = {
   clipboardRestoreMs?: number;
   retryCount: number;
   sessionDurationMs: number;
-  skippedReason?: 'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT';
+  skippedReason?: "WINDOW_CHANGED" | "PASTE_FAILED" | "TIMEOUT";
 };
 
 type PerfSummary = {
@@ -28,20 +28,21 @@ type PerfSummary = {
     injectTotalMs: number;
     sessionDurationMs: number;
   };
-  skipCounts: Record<'WINDOW_CHANGED' | 'PASTE_FAILED' | 'TIMEOUT', number>;
+  skipCounts: Record<"WINDOW_CHANGED" | "PASTE_FAILED" | "TIMEOUT", number>;
 };
 
 const MAX_SAMPLES = 120;
 
 function clampInt(value: unknown, min: number, max: number, fallback: number) {
-  const parsed = typeof value === 'number' ? value : Number(value);
+  const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, Math.round(parsed)));
 }
 
 function parseOptionalNumber(value: unknown) {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.round(value);
-  if (typeof value === 'string') {
+  if (typeof value === "number" && Number.isFinite(value))
+    return Math.round(value);
+  if (typeof value === "string") {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) return Math.round(parsed);
   }
@@ -49,13 +50,13 @@ function parseOptionalNumber(value: unknown) {
 }
 
 function parseSample(raw: unknown): PerfSample | null {
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== "object") return null;
   const item = raw as Partial<PerfSample>;
-  if (!item.sessionId || typeof item.sessionId !== 'string') return null;
+  if (!item.sessionId || typeof item.sessionId !== "string") return null;
   return {
     sessionId: item.sessionId,
     createdAt:
-      typeof item.createdAt === 'string' && item.createdAt
+      typeof item.createdAt === "string" && item.createdAt
         ? item.createdAt
         : new Date().toISOString(),
     pttToFirstPartialMs: clampInt(item.pttToFirstPartialMs, -1, 600000, -1),
@@ -67,18 +68,22 @@ function parseSample(raw: unknown): PerfSample | null {
     retryCount: clampInt(item.retryCount, 0, 10, 0),
     sessionDurationMs: clampInt(item.sessionDurationMs, 0, 600000, 0),
     skippedReason:
-      item.skippedReason === 'WINDOW_CHANGED' ||
-      item.skippedReason === 'PASTE_FAILED' ||
-      item.skippedReason === 'TIMEOUT'
+      item.skippedReason === "WINDOW_CHANGED" ||
+      item.skippedReason === "PASTE_FAILED" ||
+      item.skippedReason === "TIMEOUT"
         ? item.skippedReason
         : undefined,
   };
 }
 
 function average(values: number[]) {
-  const filtered = values.filter((value) => Number.isFinite(value) && value >= 0);
+  const filtered = values.filter(
+    (value) => Number.isFinite(value) && value >= 0,
+  );
   if (filtered.length === 0) return -1;
-  return Math.round(filtered.reduce((sum, value) => sum + value, 0) / filtered.length);
+  return Math.round(
+    filtered.reduce((sum, value) => sum + value, 0) / filtered.length,
+  );
 }
 
 export class PerfStore {
@@ -87,7 +92,7 @@ export class PerfStore {
   async append(sample: PerfSample): Promise<void> {
     const next = parseSample(sample);
     if (!next) {
-      throw new Error('Perf sample is invalid.');
+      throw new Error("Perf sample is invalid.");
     }
     const existing = await this.loadRaw();
     existing.push(next);
@@ -114,10 +119,14 @@ export class PerfStore {
     return {
       sampleCount: samples.length,
       averages: {
-        pttToFirstPartialMs: average(samples.map((sample) => sample.pttToFirstPartialMs)),
+        pttToFirstPartialMs: average(
+          samples.map((sample) => sample.pttToFirstPartialMs),
+        ),
         pttToFinalMs: average(samples.map((sample) => sample.pttToFinalMs)),
         injectTotalMs: average(samples.map((sample) => sample.injectTotalMs)),
-        sessionDurationMs: average(samples.map((sample) => sample.sessionDurationMs)),
+        sessionDurationMs: average(
+          samples.map((sample) => sample.sessionDurationMs),
+        ),
       },
       skipCounts,
     };
@@ -140,14 +149,17 @@ export class PerfStore {
     }
 
     if (pair.primary != null) {
-      await quarantineFile(this.filePath, 'corrupt');
+      await quarantineFile(this.filePath, "corrupt");
     }
 
     return [];
   }
 
   private async persist(samples: PerfSample[]): Promise<void> {
-    await writeTextFileAtomic(this.filePath, JSON.stringify(wrapStoreEnvelope(samples), null, 2));
+    await writeTextFileAtomic(
+      this.filePath,
+      JSON.stringify(wrapStoreEnvelope(samples), null, 2),
+    );
   }
 
   private tryParse(content: string | null) {

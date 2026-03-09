@@ -1,5 +1,10 @@
-import type { SttProvider, SttProviderEvents, SttResult, SttStartOptions } from './types.js';
-import { logWarn } from '../../logger.js';
+import type {
+  SttProvider,
+  SttProviderEvents,
+  SttResult,
+  SttStartOptions,
+} from "./types.js";
+import { logWarn } from "../../logger.js";
 
 // Reusing types from the original stt-session.ts for the internal Azure implementation
 type SpeechRecognitionResultPayload = {
@@ -55,7 +60,11 @@ export type SpeechSdkModule = {
     Detailed: unknown;
   };
   AudioStreamFormat: {
-    getWaveFormatPCM: (sampleRate: number, bitsPerSample: number, channels: number) => unknown;
+    getWaveFormatPCM: (
+      sampleRate: number,
+      bitsPerSample: number,
+      channels: number,
+    ) => unknown;
   };
   AudioInputStream: {
     createPushStream: (streamFormat: unknown) => PushAudioStream;
@@ -63,7 +72,10 @@ export type SpeechSdkModule = {
   AudioConfig: {
     fromStreamInput: (stream: PushAudioStream) => unknown;
   };
-  SpeechRecognizer: new (speechConfig: SpeechConfig, audioConfig: unknown) => SpeechRecognizer;
+  SpeechRecognizer: new (
+    speechConfig: SpeechConfig,
+    audioConfig: unknown,
+  ) => SpeechRecognizer;
   PhraseListGrammar?: {
     fromRecognizer: (recognizer: SpeechRecognizer) => PhraseListGrammar;
   };
@@ -104,11 +116,14 @@ export class AzureSttProvider implements SttProvider {
     if (!sdk) return;
 
     try {
-      const speechConfig = sdk.SpeechConfig.fromSubscription(this.config.key, this.config.region);
-      speechConfig.speechRecognitionLanguage = 'pt-BR';
+      const speechConfig = sdk.SpeechConfig.fromSubscription(
+        this.config.key,
+        this.config.region,
+      );
+      speechConfig.speechRecognitionLanguage = "pt-BR";
       sdk.AudioStreamFormat.getWaveFormatPCM(16000, 16, 1);
     } catch (error) {
-      logWarn('failed to prewarm azure stt provider', { error });
+      logWarn("failed to prewarm azure stt provider", { error });
     }
   }
 
@@ -124,7 +139,7 @@ export class AzureSttProvider implements SttProvider {
     this.currentSessionId = sessionId;
     this.startOptions = options;
 
-    const languages = language === 'dual' ? ['pt-BR', 'en-US'] : [language];
+    const languages = language === "dual" ? ["pt-BR", "en-US"] : [language];
 
     this.slots = languages.map((lang) => this.createSlot(lang, phrases));
 
@@ -143,7 +158,11 @@ export class AzureSttProvider implements SttProvider {
         try {
           slot.pushStream.close();
         } catch (e) {
-          logWarn('Error closing push stream', { sessionId, language: slot.language, error: e });
+          logWarn("Error closing push stream", {
+            sessionId,
+            language: slot.language,
+            error: e,
+          });
         }
 
         return new Promise<void>((resolve) => {
@@ -205,7 +224,9 @@ export class AzureSttProvider implements SttProvider {
     if (this.sdk) return this.sdk;
     if (!this.sdkLoadPromise) {
       this.sdkLoadPromise = this.getSdk().then((mod) => {
-        const maybeModule = mod as SpeechSdkModule & { default?: SpeechSdkModule };
+        const maybeModule = mod as SpeechSdkModule & {
+          default?: SpeechSdkModule;
+        };
         const sdk = maybeModule.default ?? maybeModule;
         this.sdk = sdk;
         return sdk;
@@ -216,13 +237,16 @@ export class AzureSttProvider implements SttProvider {
 
   private createSlot(language: string, phrases: string[]): AzureSlot {
     const sdk = this.sdk!;
-    const speechConfig = sdk.SpeechConfig.fromSubscription(this.config.key, this.config.region);
+    const speechConfig = sdk.SpeechConfig.fromSubscription(
+      this.config.key,
+      this.config.region,
+    );
     speechConfig.speechRecognitionLanguage = language;
 
     if (sdk.PropertyId?.SpeechServiceResponse_PostProcessingOption) {
       speechConfig.setProperty(
         sdk.PropertyId.SpeechServiceResponse_PostProcessingOption,
-        'TrueText',
+        "TrueText",
       );
     }
 
@@ -244,7 +268,7 @@ export class AzureSttProvider implements SttProvider {
         const grammar = sdk.PhraseListGrammar.fromRecognizer(recognizer);
         for (const phrase of phrases) grammar.addPhrase(phrase);
       } catch (error) {
-        logWarn('failed to apply phrase list', { language, error });
+        logWarn("failed to apply phrase list", { language, error });
       }
     }
 
@@ -252,8 +276,8 @@ export class AzureSttProvider implements SttProvider {
       language,
       recognizer,
       pushStream,
-      transcriptFinal: '',
-      lastPartial: '',
+      transcriptFinal: "",
+      lastPartial: "",
       bestConfidence: null,
       ready: false,
       buffered: [],
@@ -280,7 +304,7 @@ export class AzureSttProvider implements SttProvider {
     const sessionId = this.currentSessionId!;
 
     slot.recognizer.recognizing = (_, e) => {
-      const text = e.result?.text?.trim() ?? '';
+      const text = e.result?.text?.trim() ?? "";
       slot.lastPartial = text;
       this.emitBestPartial(sessionId, isPrimary ? text : undefined);
     };
@@ -289,7 +313,7 @@ export class AzureSttProvider implements SttProvider {
       const text = e.result?.text?.trim();
       if (!text) return;
 
-      slot.transcriptFinal = (slot.transcriptFinal + ' ' + text).trim();
+      slot.transcriptFinal = (slot.transcriptFinal + " " + text).trim();
 
       let confidence = 0.8; // Default
       if (e.result?.json) {
@@ -305,7 +329,9 @@ export class AzureSttProvider implements SttProvider {
       }
 
       slot.bestConfidence =
-        slot.bestConfidence === null ? confidence : (slot.bestConfidence + confidence) / 2;
+        slot.bestConfidence === null
+          ? confidence
+          : (slot.bestConfidence + confidence) / 2;
 
       this.emitBestRecognized(sessionId, slot, isPrimary);
     };
@@ -313,7 +339,10 @@ export class AzureSttProvider implements SttProvider {
     slot.recognizer.canceled = (_, e) => {
       slot.canceled = true;
       if (this.slots.every((candidate) => candidate.canceled) && this.events) {
-        this.events.onError(sessionId, String(e.errorDetails || e.reason || 'Canceled'));
+        this.events.onError(
+          sessionId,
+          String(e.errorDetails || e.reason || "Canceled"),
+        );
       }
     };
   }
@@ -325,15 +354,21 @@ export class AzureSttProvider implements SttProvider {
       return;
     }
 
-    const fallback = primaryText ?? this.slots[0]?.lastPartial ?? '';
-    const candidate = this.pickPreferredSlot(this.slots, { preferTranscript: false });
+    const fallback = primaryText ?? this.slots[0]?.lastPartial ?? "";
+    const candidate = this.pickPreferredSlot(this.slots, {
+      preferTranscript: false,
+    });
     const text = candidate?.lastPartial?.trim() || fallback;
     if (text) {
       this.events.onRecognizing(sessionId, text);
     }
   }
 
-  private emitBestRecognized(sessionId: string, updatedSlot: AzureSlot, isPrimary: boolean): void {
+  private emitBestRecognized(
+    sessionId: string,
+    updatedSlot: AzureSlot,
+    isPrimary: boolean,
+  ): void {
     if (!this.events) return;
     if (this.slots.length <= 1) {
       if (isPrimary) {
@@ -346,7 +381,9 @@ export class AzureSttProvider implements SttProvider {
       return;
     }
 
-    const selected = this.pickPreferredSlot(this.slots, { preferTranscript: true }) ?? updatedSlot;
+    const selected =
+      this.pickPreferredSlot(this.slots, { preferTranscript: true }) ??
+      updatedSlot;
     this.events.onRecognized(sessionId, {
       text: selected.transcriptFinal,
       confidence: selected.bestConfidence ?? 0.8,
@@ -362,14 +399,17 @@ export class AzureSttProvider implements SttProvider {
     if (activeSlots.length === 0) return null;
 
     const [primary, ...alternatives] = activeSlots;
-    const strategy = this.startOptions.dualLanguageStrategy ?? 'fallback-on-low-confidence';
+    const strategy =
+      this.startOptions.dualLanguageStrategy ?? "fallback-on-low-confidence";
     const bestAlternative =
       alternatives.length > 0
-        ? alternatives.reduce((best, current) => this.compareSlots(best, current, options))
+        ? alternatives.reduce((best, current) =>
+            this.compareSlots(best, current, options),
+          )
         : null;
 
     if (!bestAlternative) return primary;
-    if (strategy === 'parallel') {
+    if (strategy === "parallel") {
       return this.compareSlots(primary, bestAlternative, options);
     }
 
@@ -401,14 +441,22 @@ export class AzureSttProvider implements SttProvider {
     return primary;
   }
 
-  private compareSlots(left: AzureSlot, right: AzureSlot, options: { preferTranscript: boolean }) {
+  private compareSlots(
+    left: AzureSlot,
+    right: AzureSlot,
+    options: { preferTranscript: boolean },
+  ) {
     const leftConfidence = left.bestConfidence ?? 0;
     const rightConfidence = right.bestConfidence ?? 0;
     if (rightConfidence > leftConfidence) return right;
     if (rightConfidence < leftConfidence) return left;
 
-    const leftText = options.preferTranscript ? left.transcriptFinal : left.lastPartial;
-    const rightText = options.preferTranscript ? right.transcriptFinal : right.lastPartial;
+    const leftText = options.preferTranscript
+      ? left.transcriptFinal
+      : left.lastPartial;
+    const rightText = options.preferTranscript
+      ? right.transcriptFinal
+      : right.lastPartial;
     if (rightText.length > leftText.length) return right;
     return left;
   }

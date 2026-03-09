@@ -1,10 +1,10 @@
-import type { ActiveTab, ExtendedStatus } from '@/components/index/types';
-import { useAdaptiveSuggestions } from '@/hooks/useAdaptiveSuggestions';
-import { useAppSettings } from '@/hooks/useAppSettings';
-import { useDictionary } from '@/hooks/useDictionary';
-import { useHistory } from '@/hooks/useHistory';
-import { useVoiceSession } from '@/hooks/useVoiceSession';
-import type { AppToast } from '@/hooks/app-toast';
+import type { ActiveTab, ExtendedStatus } from "@/components/index/types";
+import { useAdaptiveSuggestions } from "@/hooks/useAdaptiveSuggestions";
+import { useAppSettings } from "@/hooks/useAppSettings";
+import { useDictionary } from "@/hooks/useDictionary";
+import { useHistory } from "@/hooks/useHistory";
+import { useVoiceSession } from "@/hooks/useVoiceSession";
+import type { AppToast } from "@/hooks/app-toast";
 
 type UseIndexViewModelOptions = {
   activeTab: ActiveTab;
@@ -12,7 +12,11 @@ type UseIndexViewModelOptions = {
   toast: AppToast;
 };
 
-export function useIndexViewModel({ activeTab, hasDesktopApi, toast }: UseIndexViewModelOptions) {
+export function useIndexViewModel({
+  activeTab,
+  hasDesktopApi,
+  toast,
+}: UseIndexViewModelOptions) {
   const history = useHistory({
     activeTab,
     hasDesktopApi,
@@ -40,13 +44,13 @@ export function useIndexViewModel({ activeTab, hasDesktopApi, toast }: UseIndexV
     toast,
   });
 
-  const headerStatus: ExtendedStatus | 'loading' =
-    appSettings.appStatus === 'loading'
-      ? 'loading'
+  const headerStatus: ExtendedStatus | "loading" =
+    appSettings.appStatus === "loading"
+      ? "loading"
       : voiceSession.error
-        ? 'error'
-        : voiceSession.status === 'idle'
-          ? 'idle'
+        ? "error"
+        : voiceSession.status === "idle"
+          ? "idle"
           : voiceSession.status;
 
   return {

@@ -1,28 +1,34 @@
-import type { BrowserWindow, IpcMain } from 'electron';
+import type { BrowserWindow, IpcMain } from "electron";
 import {
   MAX_PCM_CHUNK_BYTES,
   MIN_AUDIO_CHUNK_INTERVAL_MS,
   validateSttAudioPayload,
   validateSttStartPayload,
   validateSttStopPayload,
-} from '../ipc-validation.js';
-import { logInfo, logPerf, logWarn } from '../logger.js';
-import type { AppProfile, AppSettings } from '../settings-store.js';
-import type { InjectResult } from './text-injection.js';
-import { createSttProvider } from './stt/stt-factory.js';
-import type { SttProvider, SttResult } from './stt/types.js';
-import type { TranscriptIntent } from './transcript-intent.js';
+} from "../ipc-validation.js";
+import { logInfo, logPerf, logWarn } from "../logger.js";
+import type { AppProfile, AppSettings } from "../settings-store.js";
+import type { InjectResult } from "./text-injection.js";
+import { createSttProvider } from "./stt/stt-factory.js";
+import type { SttProvider, SttResult } from "./stt/types.js";
+import type { TranscriptIntent } from "./transcript-intent.js";
 
 const HUD_SUCCESS_VISIBLE_MS = 1100;
 const HUD_ERROR_VISIBLE_MS = 900;
 
-type HudVisualState = 'idle' | 'listening' | 'finalizing' | 'injecting' | 'success' | 'error';
+type HudVisualState =
+  | "idle"
+  | "listening"
+  | "finalizing"
+  | "injecting"
+  | "success"
+  | "error";
 type HudState = {
   state: HudVisualState;
   message?: string;
 };
 
-type SessionLanguage = 'pt-BR' | 'en-US' | 'dual';
+type SessionLanguage = "pt-BR" | "en-US" | "dual";
 
 type SttSession = {
   sessionId: string;
@@ -49,7 +55,7 @@ type PostprocessResult = {
   appliedRules: string[];
   intent: TranscriptIntent;
   rewriteApplied: boolean;
-  rewriteRisk: 'low' | 'medium' | 'high';
+  rewriteRisk: "low" | "medium" | "high";
 };
 
 type SessionCompletedEntry = {
@@ -57,7 +63,7 @@ type SessionCompletedEntry = {
   text: string;
   rawText: string;
   pasted: boolean;
-  skippedReason?: InjectResult['skippedReason'];
+  skippedReason?: InjectResult["skippedReason"];
   pttToFirstPartialMs?: number;
   pttToFinalMs?: number;
   retryCount: number;
@@ -67,13 +73,13 @@ type SessionCompletedEntry = {
   pasteAttemptMs?: number;
   clipboardRestoreMs?: number;
   languageChosen: string;
-  confidenceBucket: 'high' | 'medium' | 'low';
+  confidenceBucket: "high" | "medium" | "low";
   appKey?: string | null;
   intent: TranscriptIntent;
   appliedRules?: string[];
   rewriteApplied: boolean;
-  rewriteRisk: 'low' | 'medium' | 'high';
-  injectionMethod?: InjectResult['method'];
+  rewriteRisk: "low" | "medium" | "high";
+  injectionMethod?: InjectResult["method"];
 };
 
 type SttSessionManager = {
@@ -81,7 +87,10 @@ type SttSessionManager = {
   invalidateRuntimeCaches: () => void;
   prewarmStt: () => Promise<void>;
   primeTargetWindowForSession: (sessionId: string) => Promise<void>;
-  startSessionFromHotkey: (sender: Electron.WebContents, sid: string) => Promise<{ ok: boolean }>;
+  startSessionFromHotkey: (
+    sender: Electron.WebContents,
+    sid: string,
+  ) => Promise<{ ok: boolean }>;
   getActiveSessionId: () => string | null;
   hasActiveSession: () => boolean;
   scheduleStop: (sessionId: string) => void;
@@ -101,7 +110,7 @@ type SttSessionManagerOptions = {
   emitAppError: (message: string) => void;
   postprocessTranscript: (args: {
     rawText: string;
-    language: 'pt-BR' | 'en-US';
+    language: "pt-BR" | "en-US";
     appKey?: string | null;
     confidence?: number;
   }) => Promise<PostprocessResult>;
@@ -119,7 +128,9 @@ type SttSessionManagerOptions = {
   getDictionaryPhrases: (seedPhrases: string[]) => Promise<string[]>;
   onSessionCompleted?: (entry: SessionCompletedEntry) => Promise<void> | void;
   getAppProfile?: (appKey: string | null) => AppProfile | undefined;
-  resolveLowConfidencePolicy?: (confidence?: number) => 'paste' | 'copy-only' | 'review';
+  resolveLowConfidencePolicy?: (
+    confidence?: number,
+  ) => "paste" | "copy-only" | "review";
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -130,7 +141,9 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-export function createSttSessionManager(options: SttSessionManagerOptions): SttSessionManager {
+export function createSttSessionManager(
+  options: SttSessionManagerOptions,
+): SttSessionManager {
   let activeSession: SttSession | null = null;
   let prewarmedProvider: SttProvider | null = null;
   let prewarmPromise: Promise<void> | null = null;
@@ -148,7 +161,10 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
     return Boolean(activeSession && activeSession.sessionId === sessionId);
   }
 
-  function isCurrentSessionOwner(sender: Electron.WebContents, sessionId: string) {
+  function isCurrentSessionOwner(
+    sender: Electron.WebContents,
+    sessionId: string,
+  ) {
     return Boolean(
       activeSession &&
       activeSession.sessionId === sessionId &&
@@ -179,14 +195,17 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
     settings: AppSettings,
     appProfile: AppProfile | undefined,
   ): SessionLanguage {
-    if (payloadLanguage === 'pt-BR' || payloadLanguage === 'en-US') {
+    if (payloadLanguage === "pt-BR" || payloadLanguage === "en-US") {
       return payloadLanguage;
     }
 
-    if (appProfile?.languageBias === 'mixed') {
-      return 'dual';
+    if (appProfile?.languageBias === "mixed") {
+      return "dual";
     }
-    if (appProfile?.languageBias === 'pt-BR' || appProfile?.languageBias === 'en-US') {
+    if (
+      appProfile?.languageBias === "pt-BR" ||
+      appProfile?.languageBias === "en-US"
+    ) {
       return appProfile.languageBias;
     }
 
@@ -201,19 +220,25 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
 
   function armSessionTimeout(session: SttSession) {
     clearSessionTimeout(session);
-    const maxSessionSeconds = clamp(options.getSettings().maxSessionSeconds, 30, 600);
+    const maxSessionSeconds = clamp(
+      options.getSettings().maxSessionSeconds,
+      30,
+      600,
+    );
     session.timeoutTimer = setTimeout(() => {
       if (!isCurrentSession(session.sessionId) || session.ending) return;
       session.timedOut = true;
       session.ending = true;
       const message = `Sessão encerrada após ${maxSessionSeconds} s para evitar captura contínua.`;
-      options.broadcast('stt:error', { sessionId: session.sessionId, message });
+      options.broadcast("stt:error", { sessionId: session.sessionId, message });
       options.emitAppError(message);
-      options.setHudState({ state: 'error', message });
+      options.setHudState({ state: "error", message });
 
       const mainWindow = options.getMainWindow();
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('capture:stop', { sessionId: session.sessionId });
+        mainWindow.webContents.send("capture:stop", {
+          sessionId: session.sessionId,
+        });
       }
     }, maxSessionSeconds * 1000);
   }
@@ -222,13 +247,13 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
     if (!isCurrentSession(session.sessionId) || session.ending) return;
     session.ending = true;
     clearSessionTimeout(session);
-    options.broadcast('stt:error', { sessionId: session.sessionId, message });
-    options.setHudState({ state: 'error', message });
+    options.broadcast("stt:error", { sessionId: session.sessionId, message });
+    options.setHudState({ state: "error", message });
     options.emitAppError(message);
 
     try {
       if (!session.sender.isDestroyed?.()) {
-        session.sender.send('capture:stop', { sessionId: session.sessionId });
+        session.sender.send("capture:stop", { sessionId: session.sessionId });
       }
     } catch {
       // ignore renderer stop propagation failures
@@ -266,8 +291,8 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
       if (!mainWindow || mainWindow.isDestroyed()) return;
 
       activeSession.ending = true;
-      mainWindow.webContents.send('capture:stop', { sessionId: sid });
-      options.setHudState({ state: 'finalizing' });
+      mainWindow.webContents.send("capture:stop", { sessionId: sid });
+      options.setHudState({ state: "finalizing" });
     }, ms);
   }
 
@@ -284,7 +309,9 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
       lastPhraseBoostCount = phraseCache.length;
       phraseCacheDirty = false;
     }
-    const appPhrases = appKey ? (options.getAppProfile?.(appKey)?.extraPhrases ?? []) : [];
+    const appPhrases = appKey
+      ? (options.getAppProfile?.(appKey)?.extraPhrases ?? [])
+      : [];
     return Array.from(new Set([...phraseCache, ...appPhrases]));
   }
 
@@ -302,8 +329,8 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
       prewarmedConfigSignature = null;
     }
 
-    const provider = createSttProvider('azure', azureConfig, async () => {
-      const mod = await import('microsoft-cognitiveservices-speech-sdk');
+    const provider = createSttProvider("azure", azureConfig, async () => {
+      const mod = await import("microsoft-cognitiveservices-speech-sdk");
       return mod.default || mod;
     });
 
@@ -312,11 +339,11 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
         await provider.prewarm?.();
         prewarmedProvider = provider;
         prewarmedConfigSignature = configSignature;
-        logInfo('stt prewarm completed');
+        logInfo("stt prewarm completed");
       } catch (error) {
         provider.close();
         prewarmedConfigSignature = null;
-        logWarn('stt prewarm failed', { error });
+        logWarn("stt prewarm failed", { error });
       } finally {
         prewarmPromise = null;
       }
@@ -339,10 +366,14 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
 
     if (activeSession) {
       if (activeSession.sessionId === payload.sessionId) {
-        const pendingCurrentSession = pendingSttStartBySession.get(payload.sessionId);
-        return pendingCurrentSession ? await pendingCurrentSession : { ok: true };
+        const pendingCurrentSession = pendingSttStartBySession.get(
+          payload.sessionId,
+        );
+        return pendingCurrentSession
+          ? await pendingCurrentSession
+          : { ok: true };
       }
-      throw new Error('A session is already active.');
+      throw new Error("A session is already active.");
     }
 
     const started = (async () => {
@@ -357,7 +388,11 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
           : null;
         const appProfile = options.getAppProfile?.(appKey);
         const phrases = await getActivePhrasesCached(appKey);
-        const language = resolveSessionLanguage(payload.language, settings, appProfile);
+        const language = resolveSessionLanguage(
+          payload.language,
+          settings,
+          appProfile,
+        );
         const azureConfig = options.getAzureCredentials();
         const configSignature = getAzureConfigSignature(azureConfig);
 
@@ -373,8 +408,8 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
 
         const provider =
           prewarmedProvider ??
-          createSttProvider('azure', azureConfig, async () => {
-            const mod = await import('microsoft-cognitiveservices-speech-sdk');
+          createSttProvider("azure", azureConfig, async () => {
+            const mod = await import("microsoft-cognitiveservices-speech-sdk");
             return mod.default || mod;
           });
         prewarmedProvider = null;
@@ -408,8 +443,9 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
           {
             onRecognizing: (sid, text) => {
               if (!isCurrentSession(sid)) return;
-              if (session.firstPartialAtMs === null) session.firstPartialAtMs = Date.now();
-              options.broadcast('stt:partial', { sessionId: sid, text });
+              if (session.firstPartialAtMs === null)
+                session.firstPartialAtMs = Date.now();
+              options.broadcast("stt:partial", { sessionId: sid, text });
             },
             onRecognized: (sid, result) => {
               if (!isCurrentSession(sid)) return;
@@ -426,14 +462,16 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
         );
 
         if (!isCurrentSession(payload.sessionId) || session.ending) {
-          throw new Error('A sessão foi encerrada durante a inicialização do STT.');
+          throw new Error(
+            "A sessão foi encerrada durante a inicialização do STT.",
+          );
         }
 
-        options.setHudState({ state: 'listening' });
+        options.setHudState({ state: "listening" });
         return { ok: true };
       } catch (error) {
         releaseActiveSession(payload.sessionId);
-        logWarn('failed to start stt session', { error });
+        logWarn("failed to start stt session", { error });
         throw error;
       }
     })();
@@ -447,13 +485,14 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
   }
 
   async function stopSession(payload: { sessionId: string }) {
-    if (!activeSession || activeSession.sessionId !== payload.sessionId) return { ok: false };
+    if (!activeSession || activeSession.sessionId !== payload.sessionId)
+      return { ok: false };
 
     const session = activeSession;
     session.ending = true;
     cancelPendingStop();
     clearSessionTimeout(session);
-    options.setHudState({ state: 'finalizing' });
+    options.setHudState({ state: "finalizing" });
 
     try {
       await session.provider.stop(session.sessionId);
@@ -462,47 +501,59 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
       const result = session.lastResult;
       if (!result || !result.text) {
         if (session.timedOut) {
-          options.setHudState({ state: 'error', message: 'Sessão encerrada por tempo máximo.' });
+          options.setHudState({
+            state: "error",
+            message: "Sessão encerrada por tempo máximo.",
+          });
           await sleep(HUD_ERROR_VISIBLE_MS);
-          setHudStateIfCurrent(session.sessionId, { state: 'idle' });
+          setHudStateIfCurrent(session.sessionId, { state: "idle" });
           return {
             ok: false,
-            text: '',
+            text: "",
             timedOut: true,
-            message: 'Sessão encerrada por tempo máximo.',
+            message: "Sessão encerrada por tempo máximo.",
           };
         }
-        setHudStateIfCurrent(session.sessionId, { state: 'idle' });
-        return { ok: true, text: '' };
+        setHudStateIfCurrent(session.sessionId, { state: "idle" });
+        return { ok: true, text: "" };
       }
 
       const postprocessed = await options.postprocessTranscript({
         rawText: result.text,
-        language: result.language as 'pt-BR' | 'en-US',
+        language: result.language as "pt-BR" | "en-US",
         appKey: session.appKey,
         confidence: result.confidence,
       });
       const lowConfidencePolicy =
-        options.resolveLowConfidencePolicy?.(result.confidence) ?? 'paste';
-      const forceCopyOnly = lowConfidencePolicy === 'copy-only' || lowConfidencePolicy === 'review';
+        options.resolveLowConfidencePolicy?.(result.confidence) ?? "paste";
+      const forceCopyOnly =
+        lowConfidencePolicy === "copy-only" || lowConfidencePolicy === "review";
 
-      options.broadcast('stt:final', { sessionId: session.sessionId, text: postprocessed.text });
-      options.setHudState({ state: 'injecting' });
-
-      const targetWindowHandle = await options.resolveInjectionTargetWindowHandle(
-        session.targetWindowHandle,
-      );
-      const injection = await options.injectText(postprocessed.text, targetWindowHandle, {
-        forceCopyOnly,
+      options.broadcast("stt:final", {
+        sessionId: session.sessionId,
+        text: postprocessed.text,
       });
+      options.setHudState({ state: "injecting" });
+
+      const targetWindowHandle =
+        await options.resolveInjectionTargetWindowHandle(
+          session.targetWindowHandle,
+        );
+      const injection = await options.injectText(
+        postprocessed.text,
+        targetWindowHandle,
+        {
+          forceCopyOnly,
+        },
+      );
       session.injectAtMs = Date.now();
       const completionMessage =
-        lowConfidencePolicy === 'review'
-          ? 'Texto copiado para revisão antes de colar.'
-          : lowConfidencePolicy === 'copy-only'
-            ? 'Texto copiado sem colagem automática devido à baixa confiança.'
+        lowConfidencePolicy === "review"
+          ? "Texto copiado para revisão antes de colar."
+          : lowConfidencePolicy === "copy-only"
+            ? "Texto copiado sem colagem automática devido à baixa confiança."
             : session.timedOut
-              ? 'Sessão encerrada por tempo máximo.'
+              ? "Sessão encerrada por tempo máximo."
               : undefined;
 
       if (options.onSessionCompleted) {
@@ -517,7 +568,9 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
               ? undefined
               : session.firstPartialAtMs - session.startedAtMs,
           pttToFinalMs:
-            session.finalAtMs === null ? undefined : session.finalAtMs - session.startedAtMs,
+            session.finalAtMs === null
+              ? undefined
+              : session.finalAtMs - session.startedAtMs,
           retryCount: session.retryCount,
           sessionDurationMs: Date.now() - session.startedAtMs,
           injectTotalMs: session.injectAtMs - session.finalAtMs,
@@ -526,7 +579,11 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
           clipboardRestoreMs: injection.metrics?.clipboardRestoreMs,
           languageChosen: result.language,
           confidenceBucket:
-            result.confidence >= 0.8 ? 'high' : result.confidence >= 0.6 ? 'medium' : 'low',
+            result.confidence >= 0.8
+              ? "high"
+              : result.confidence >= 0.6
+                ? "medium"
+                : "low",
           appKey: session.appKey,
           intent: postprocessed.intent,
           appliedRules: postprocessed.appliedRules,
@@ -536,9 +593,9 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
         });
       }
 
-      options.setHudState({ state: 'success' });
+      options.setHudState({ state: "success" });
       await sleep(HUD_SUCCESS_VISIBLE_MS);
-      setHudStateIfCurrent(session.sessionId, { state: 'idle' });
+      setHudStateIfCurrent(session.sessionId, { state: "idle" });
       return {
         ok: true,
         text: postprocessed.text,
@@ -546,10 +603,10 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
         message: completionMessage,
       };
     } catch (error) {
-      logWarn('failed to stop stt session', { error });
-      options.setHudState({ state: 'error', message: String(error) });
+      logWarn("failed to stop stt session", { error });
+      options.setHudState({ state: "error", message: String(error) });
       await sleep(HUD_ERROR_VISIBLE_MS);
-      setHudStateIfCurrent(session.sessionId, { state: 'idle' });
+      setHudStateIfCurrent(session.sessionId, { state: "idle" });
       return { ok: false };
     } finally {
       releaseActiveSession(session.sessionId);
@@ -558,24 +615,25 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
   }
 
   function registerIpcHandlers(ipcMain: IpcMain) {
-    ipcMain.handle('stt:start', async (event, payload: unknown) => {
+    ipcMain.handle("stt:start", async (event, payload: unknown) => {
       const validated = validateSttStartPayload(payload);
       if (
         activeSession &&
         activeSession.sessionId === validated.sessionId &&
         activeSession.sender.id !== event.sender.id
       ) {
-        throw new Error('Another renderer owns the active session.');
+        throw new Error("Another renderer owns the active session.");
       }
       return await startSttSession(event.sender, validated);
     });
 
-    ipcMain.on('stt:audio', (event, payload: unknown) => {
+    ipcMain.on("stt:audio", (event, payload: unknown) => {
       try {
         const validated = validateSttAudioPayload(payload);
-        if (!activeSession || activeSession.sessionId !== validated.sessionId) return;
+        if (!activeSession || activeSession.sessionId !== validated.sessionId)
+          return;
         if (!isCurrentSessionOwner(event.sender, validated.sessionId)) {
-          logWarn('ignored stt audio from non-owner renderer', {
+          logWarn("ignored stt audio from non-owner renderer", {
             sessionId: validated.sessionId,
             senderId: event.sender.id,
           });
@@ -599,20 +657,20 @@ export function createSttSessionManager(options: SttSessionManagerOptions): SttS
             : Buffer.from(new Uint8Array(validated.pcm16kMonoInt16));
         activeSession.provider.writeAudio(validated.sessionId, pcmBuffer);
       } catch (error) {
-        logWarn('ignored malformed stt audio payload', {
+        logWarn("ignored malformed stt audio payload", {
           error: error instanceof Error ? error.message : String(error),
         });
       }
     });
 
-    ipcMain.handle('stt:stop', async (event, payload: unknown) => {
+    ipcMain.handle("stt:stop", async (event, payload: unknown) => {
       const validated = validateSttStopPayload(payload);
       if (
         activeSession &&
         activeSession.sessionId === validated.sessionId &&
         !isCurrentSessionOwner(event.sender, validated.sessionId)
       ) {
-        throw new Error('Another renderer owns the active session.');
+        throw new Error("Another renderer owns the active session.");
       }
       return await stopSession(validated);
     });

@@ -4,7 +4,7 @@ import {
   unwrapStoreEnvelope,
   wrapStoreEnvelope,
   writeTextFileAtomic,
-} from './store-utils.js';
+} from "./store-utils.js";
 
 type AdaptiveStoreCodec = {
   isEncryptionAvailable?: () => boolean;
@@ -38,7 +38,7 @@ const EMPTY_STATE: AdaptiveStoreState = {
 };
 
 function normalizeTerm(term: string) {
-  return term.replace(/\s+/g, ' ').trim();
+  return term.replace(/\s+/g, " ").trim();
 }
 
 function isLearnableTerm(term: string) {
@@ -59,12 +59,12 @@ function clampDismissed(ids: string[]) {
 }
 
 function parseState(raw: unknown): AdaptiveStoreState {
-  if (!raw || typeof raw !== 'object') return { ...EMPTY_STATE };
+  if (!raw || typeof raw !== "object") return { ...EMPTY_STATE };
   const input = raw as Partial<AdaptiveStoreState>;
   const apps: Record<string, AdaptiveAppStats> = {};
 
   for (const [appKey, rawStats] of Object.entries(input.apps ?? {})) {
-    if (!appKey || !rawStats || typeof rawStats !== 'object') continue;
+    if (!appKey || !rawStats || typeof rawStats !== "object") continue;
     const stats = rawStats as Partial<AdaptiveAppStats>;
     apps[appKey] = {
       appKey,
@@ -75,35 +75,43 @@ function parseState(raw: unknown): AdaptiveStoreState {
         ? Math.max(0, Math.round(stats.lowConfidenceCount!))
         : 0,
       intentCounts:
-        stats.intentCounts && typeof stats.intentCounts === 'object'
+        stats.intentCounts && typeof stats.intentCounts === "object"
           ? Object.fromEntries(
               Object.entries(stats.intentCounts)
-                .filter((entry): entry is [string, number] => Number.isFinite(entry[1]))
+                .filter((entry): entry is [string, number] =>
+                  Number.isFinite(entry[1]),
+                )
                 .map(([key, value]) => [key, Math.max(0, Math.round(value))]),
             )
           : {},
       languageCounts:
-        stats.languageCounts && typeof stats.languageCounts === 'object'
+        stats.languageCounts && typeof stats.languageCounts === "object"
           ? Object.fromEntries(
               Object.entries(stats.languageCounts)
-                .filter((entry): entry is [string, number] => Number.isFinite(entry[1]))
+                .filter((entry): entry is [string, number] =>
+                  Number.isFinite(entry[1]),
+                )
                 .map(([key, value]) => [key, Math.max(0, Math.round(value))]),
             )
           : {},
       termStats:
-        stats.termStats && typeof stats.termStats === 'object'
+        stats.termStats && typeof stats.termStats === "object"
           ? Object.fromEntries(
               Object.entries(stats.termStats)
-                .filter(([, value]) => Boolean(value && typeof value === 'object'))
+                .filter(([, value]) =>
+                  Boolean(value && typeof value === "object"),
+                )
                 .map(([key, value]) => {
                   const item = value as Partial<AdaptiveTermStats>;
                   return [
                     key,
                     {
                       term: normalizeTerm(item.term ?? key),
-                      count: Number.isFinite(item.count) ? Math.max(0, Math.round(item.count!)) : 0,
+                      count: Number.isFinite(item.count)
+                        ? Math.max(0, Math.round(item.count!))
+                        : 0,
                       lastSeenAt:
-                        typeof item.lastSeenAt === 'string' && item.lastSeenAt
+                        typeof item.lastSeenAt === "string" && item.lastSeenAt
                           ? item.lastSeenAt
                           : new Date().toISOString(),
                     },
@@ -118,7 +126,9 @@ function parseState(raw: unknown): AdaptiveStoreState {
     apps,
     dismissedSuggestionIds: clampDismissed(
       Array.isArray(input.dismissedSuggestionIds)
-        ? input.dismissedSuggestionIds.filter((entry): entry is string => typeof entry === 'string')
+        ? input.dismissedSuggestionIds.filter(
+            (entry): entry is string => typeof entry === "string",
+          )
         : [],
     ),
   };
@@ -157,7 +167,7 @@ export class AdaptiveStore {
     }
 
     if (pair.primary != null) {
-      await quarantineFile(this.filePath, 'corrupt');
+      await quarantineFile(this.filePath, "corrupt");
     }
 
     await this.persist(this.cached);
@@ -169,7 +179,10 @@ export class AdaptiveStore {
     if (!cleanId) return this.cached;
     const next = {
       ...this.cached,
-      dismissedSuggestionIds: clampDismissed([...this.cached.dismissedSuggestionIds, cleanId]),
+      dismissedSuggestionIds: clampDismissed([
+        ...this.cached.dismissedSuggestionIds,
+        cleanId,
+      ]),
     };
     this.cached = next;
     await this.persist(next);
@@ -181,9 +194,9 @@ export class AdaptiveStore {
     text: string;
     intent?: string;
     languageChosen?: string;
-    confidenceBucket?: 'high' | 'medium' | 'low';
+    confidenceBucket?: "high" | "medium" | "low";
   }) {
-    const appKey = normalizeTerm(entry.appKey ?? '').toLocaleLowerCase();
+    const appKey = normalizeTerm(entry.appKey ?? "").toLocaleLowerCase();
     if (!appKey) return this.cached;
 
     const current = this.cached.apps[appKey] ?? {
@@ -198,14 +211,16 @@ export class AdaptiveStore {
     const nextStats: AdaptiveAppStats = {
       ...current,
       sessionCount: current.sessionCount + 1,
-      lowConfidenceCount: current.lowConfidenceCount + (entry.confidenceBucket === 'low' ? 1 : 0),
+      lowConfidenceCount:
+        current.lowConfidenceCount + (entry.confidenceBucket === "low" ? 1 : 0),
       intentCounts: { ...current.intentCounts },
       languageCounts: { ...current.languageCounts },
       termStats: { ...current.termStats },
     };
 
     if (entry.intent) {
-      nextStats.intentCounts[entry.intent] = (nextStats.intentCounts[entry.intent] ?? 0) + 1;
+      nextStats.intentCounts[entry.intent] =
+        (nextStats.intentCounts[entry.intent] ?? 0) + 1;
     }
     if (entry.languageChosen) {
       nextStats.languageCounts[entry.languageChosen] =
@@ -220,7 +235,8 @@ export class AdaptiveStore {
         lastSeenAt: new Date().toISOString(),
       };
       nextStats.termStats[key] = {
-        term: currentTerm.term.length >= token.length ? currentTerm.term : token,
+        term:
+          currentTerm.term.length >= token.length ? currentTerm.term : token,
         count: currentTerm.count + 1,
         lastSeenAt: new Date().toISOString(),
       };
@@ -255,7 +271,8 @@ export class AdaptiveStore {
   }
 
   private encodeContent(content: string) {
-    if (!this.codec?.encryptString || !this.codec.isEncryptionAvailable?.()) return content;
+    if (!this.codec?.encryptString || !this.codec.isEncryptionAvailable?.())
+      return content;
     try {
       return this.codec.encryptString(content);
     } catch {

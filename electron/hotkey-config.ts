@@ -8,30 +8,30 @@ export type HoldHotkeyChord = {
 };
 
 const ACCELERATOR_ALIASES: Record<string, string> = {
-  commandorcontrol: 'CommandOrControl',
-  control: 'Control',
-  ctrl: 'Control',
-  cmdorctrl: 'CommandOrControl',
-  command: 'Command',
-  meta: 'Meta',
-  super: 'Super',
-  win: 'Super',
-  windows: 'Super',
-  alt: 'Alt',
-  option: 'Alt',
-  shift: 'Shift',
-  space: 'Space',
+  commandorcontrol: "CommandOrControl",
+  control: "Control",
+  ctrl: "Control",
+  cmdorctrl: "CommandOrControl",
+  command: "Command",
+  meta: "Meta",
+  super: "Super",
+  win: "Super",
+  windows: "Super",
+  alt: "Alt",
+  option: "Alt",
+  shift: "Shift",
+  space: "Space",
 };
 
 const UI_LABELS: Record<string, string> = {
-  CommandOrControl: 'Ctrl',
-  Control: 'Ctrl',
-  Command: 'Win',
-  Meta: 'Win',
-  Super: 'Win',
-  Alt: 'Alt',
-  Shift: 'Shift',
-  Space: 'Space',
+  CommandOrControl: "Ctrl",
+  Control: "Ctrl",
+  Command: "Win",
+  Meta: "Win",
+  Super: "Win",
+  Alt: "Alt",
+  Shift: "Shift",
+  Space: "Space",
 };
 
 const HOLD_KEYCODE_MAP: Record<string, number> = {
@@ -63,17 +63,18 @@ const HOLD_KEYCODE_MAP: Record<string, number> = {
   PageDown: 3665,
 };
 
-for (const digit of '0123456789') {
-  HOLD_KEYCODE_MAP[digit] = digit === '0' ? 11 : Number(digit) + 1;
+for (const digit of "0123456789") {
+  HOLD_KEYCODE_MAP[digit] = digit === "0" ? 11 : Number(digit) + 1;
 }
 
 const LETTER_KEYCODES = [
-  30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45,
-  21, 44,
+  30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31,
+  20, 22, 47, 17, 45, 21, 44,
 ];
 
 for (let index = 0; index < 26; index += 1) {
-  HOLD_KEYCODE_MAP[String.fromCharCode(65 + index)] = LETTER_KEYCODES[index] ?? 0;
+  HOLD_KEYCODE_MAP[String.fromCharCode(65 + index)] =
+    LETTER_KEYCODES[index] ?? 0;
 }
 
 function normalizeToken(rawToken: string) {
@@ -91,36 +92,36 @@ function normalizeToken(rawToken: string) {
   }
 
   if (
-    compact === 'ArrowLeft' ||
-    compact === 'ArrowUp' ||
-    compact === 'ArrowRight' ||
-    compact === 'ArrowDown'
+    compact === "ArrowLeft" ||
+    compact === "ArrowUp" ||
+    compact === "ArrowRight" ||
+    compact === "ArrowDown"
   ) {
     return compact;
   }
 
   if (
-    compact === 'Backspace' ||
-    compact === 'Tab' ||
-    compact === 'Enter' ||
-    compact === 'Escape' ||
-    compact === 'Insert' ||
-    compact === 'Delete' ||
-    compact === 'Home' ||
-    compact === 'End' ||
-    compact === 'PageUp' ||
-    compact === 'PageDown' ||
-    compact === 'Semicolon' ||
-    compact === 'Equal' ||
-    compact === 'Comma' ||
-    compact === 'Minus' ||
-    compact === 'Period' ||
-    compact === 'Slash' ||
-    compact === 'Backquote' ||
-    compact === 'BracketLeft' ||
-    compact === 'Backslash' ||
-    compact === 'BracketRight' ||
-    compact === 'Quote'
+    compact === "Backspace" ||
+    compact === "Tab" ||
+    compact === "Enter" ||
+    compact === "Escape" ||
+    compact === "Insert" ||
+    compact === "Delete" ||
+    compact === "Home" ||
+    compact === "End" ||
+    compact === "PageUp" ||
+    compact === "PageDown" ||
+    compact === "Semicolon" ||
+    compact === "Equal" ||
+    compact === "Comma" ||
+    compact === "Minus" ||
+    compact === "Period" ||
+    compact === "Slash" ||
+    compact === "Backquote" ||
+    compact === "BracketLeft" ||
+    compact === "Backslash" ||
+    compact === "BracketRight" ||
+    compact === "Quote"
   ) {
     return compact;
   }
@@ -130,7 +131,7 @@ function normalizeToken(rawToken: string) {
 
 function tokenizeAccelerator(value: string) {
   const tokens = value
-    .split('+')
+    .split("+")
     .map((entry) => normalizeToken(entry))
     .filter((entry): entry is string => Boolean(entry));
 
@@ -140,39 +141,41 @@ function tokenizeAccelerator(value: string) {
 export function normalizeHotkeyAccelerator(value: string) {
   const tokens = tokenizeAccelerator(value);
   if (tokens.length < 2) {
-    throw new Error('O atalho precisa ter pelo menos duas teclas.');
+    throw new Error("O atalho precisa ter pelo menos duas teclas.");
   }
 
   const modifierCount = tokens.filter(
     (token) =>
-      token === 'CommandOrControl' ||
-      token === 'Control' ||
-      token === 'Alt' ||
-      token === 'Shift' ||
-      token === 'Meta' ||
-      token === 'Command' ||
-      token === 'Super',
+      token === "CommandOrControl" ||
+      token === "Control" ||
+      token === "Alt" ||
+      token === "Shift" ||
+      token === "Meta" ||
+      token === "Command" ||
+      token === "Super",
   ).length;
 
   if (modifierCount === 0) {
-    throw new Error('O atalho precisa incluir ao menos uma tecla modificadora.');
+    throw new Error(
+      "O atalho precisa incluir ao menos uma tecla modificadora.",
+    );
   }
 
   if (tokens.length > 4) {
-    throw new Error('O atalho excede o limite de quatro teclas.');
+    throw new Error("O atalho excede o limite de quatro teclas.");
   }
 
-  return tokens.join('+');
+  return tokens.join("+");
 }
 
 export function hotkeyLabelFromAccelerator(accelerator: string) {
   const tokens = tokenizeAccelerator(accelerator);
-  return tokens.map((token) => UI_LABELS[token] ?? token).join('+');
+  return tokens.map((token) => UI_LABELS[token] ?? token).join("+");
 }
 
 export function parseHoldHotkeyChord(accelerator: string): HoldHotkeyChord {
   const normalized = normalizeHotkeyAccelerator(accelerator);
-  const tokens = normalized.split('+');
+  const tokens = normalized.split("+");
   const keys: number[] = [];
   let ctrl = false;
   let alt = false;
@@ -180,32 +183,36 @@ export function parseHoldHotkeyChord(accelerator: string): HoldHotkeyChord {
   let meta = false;
 
   for (const token of tokens) {
-    if (token === 'CommandOrControl' || token === 'Control') {
+    if (token === "CommandOrControl" || token === "Control") {
       ctrl = true;
       continue;
     }
-    if (token === 'Alt') {
+    if (token === "Alt") {
       alt = true;
       continue;
     }
-    if (token === 'Shift') {
+    if (token === "Shift") {
       shift = true;
       continue;
     }
-    if (token === 'Meta' || token === 'Command' || token === 'Super') {
+    if (token === "Meta" || token === "Command" || token === "Super") {
       meta = true;
       continue;
     }
 
     const keycode = HOLD_KEYCODE_MAP[token];
     if (!keycode) {
-      throw new Error(`A tecla ${token} nao e suportada para hold-to-talk no Windows.`);
+      throw new Error(
+        `A tecla ${token} nao e suportada para hold-to-talk no Windows.`,
+      );
     }
     keys.push(keycode);
   }
 
   if (!ctrl && !alt && !shift && !meta) {
-    throw new Error('O atalho precisa incluir ao menos uma tecla modificadora.');
+    throw new Error(
+      "O atalho precisa incluir ao menos uma tecla modificadora.",
+    );
   }
 
   return {

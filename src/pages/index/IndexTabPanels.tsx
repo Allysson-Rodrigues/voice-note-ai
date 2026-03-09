@@ -1,12 +1,12 @@
-import CaptureTab from '@/components/index/CaptureTab';
-import type { ActiveTab } from '@/components/index/types';
-import { Tabs, TabsContent } from '@/components/ui/tabs';
-import type { useIndexViewModel } from './useIndexViewModel';
-import { Suspense, lazy } from 'react';
+import CaptureTab from "@/components/index/CaptureTab";
+import type { ActiveTab } from "@/components/index/types";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import type { useIndexViewModel } from "./useIndexViewModel";
+import { Suspense, lazy } from "react";
 
-const DictionaryTab = lazy(() => import('@/components/index/DictionaryTab'));
-const HistoryTab = lazy(() => import('@/components/index/HistoryTab'));
-const SettingsTab = lazy(() => import('@/components/index/SettingsTab'));
+const DictionaryTab = lazy(() => import("@/components/index/DictionaryTab"));
+const HistoryTab = lazy(() => import("@/components/index/HistoryTab"));
+const SettingsTab = lazy(() => import("@/components/index/SettingsTab"));
 
 type IndexViewModel = ReturnType<typeof useIndexViewModel>;
 
@@ -14,8 +14,8 @@ type IndexTabPanelsProps = {
   activeTab: ActiveTab;
   hasDesktopApi: boolean;
   onSetActiveTab: (tab: ActiveTab) => void;
-  theme: 'light' | 'dark' | 'system';
-  onSetTheme: (theme: 'light' | 'dark' | 'system') => void;
+  theme: "light" | "dark" | "system";
+  onSetTheme: (theme: "light" | "dark" | "system") => void;
   vm: IndexViewModel;
 };
 
@@ -52,7 +52,7 @@ export default function IndexTabPanels({
           healthItems={vm.voiceSession.healthItems}
           healthLoading={vm.voiceSession.healthLoading}
           hotkeyLabel={vm.voiceSession.hotkeyLabel}
-          onGoToSettings={() => onSetActiveTab('settings')}
+          onGoToSettings={() => onSetActiveTab("settings")}
           onManualStart={() => void vm.voiceSession.manualStart()}
           onManualStop={() => void vm.voiceSession.manualStop()}
           onRetryHoldHook={() => void vm.voiceSession.retryHoldHook()}
@@ -67,7 +67,7 @@ export default function IndexTabPanels({
         value="dictionary"
         className="custom-scrollbar mt-0 h-full min-h-0 overflow-y-auto pr-2 animate-in fade-in slide-in-from-bottom-4 duration-500 outline-none"
       >
-        <Suspense fallback={tabFallback('Dicionário')}>
+        <Suspense fallback={tabFallback("Dicionário")}>
           <DictionaryTab
             canonicalTerms={vm.dictionary.canonicalTerms}
             dictionary={vm.dictionary.dictionary}
@@ -81,8 +81,12 @@ export default function IndexTabPanels({
             onAddCanonicalTerm={() => void vm.dictionary.addCanonicalTerm()}
             onAddDictionaryTerm={() => void vm.dictionary.addDictionaryTerm()}
             onDictionaryReload={() => void vm.dictionary.loadDictionaryData()}
-            onRemoveCanonicalTerm={(index) => void vm.dictionary.removeCanonicalTerm(index)}
-            onRemoveDictionaryTerm={(id) => void vm.dictionary.removeDictionaryTerm(id)}
+            onRemoveCanonicalTerm={(index) =>
+              void vm.dictionary.removeCanonicalTerm(index)
+            }
+            onRemoveDictionaryTerm={(id) =>
+              void vm.dictionary.removeDictionaryTerm(id)
+            }
             onSetNewCanonicalFrom={vm.dictionary.setNewCanonicalFrom}
             onSetNewCanonicalTo={vm.dictionary.setNewCanonicalTo}
             onSetNewHintPt={vm.dictionary.setNewHintPt}
@@ -101,7 +105,7 @@ export default function IndexTabPanels({
         value="history"
         className="custom-scrollbar mt-0 h-full min-h-0 overflow-y-auto pr-2 animate-in fade-in slide-in-from-bottom-4 duration-500 outline-none"
       >
-        <Suspense fallback={tabFallback('Histórico')}>
+        <Suspense fallback={tabFallback("Histórico")}>
           <HistoryTab
             hasDesktopApi={hasDesktopApi}
             historyBusy={vm.history.historyBusy}
@@ -109,9 +113,13 @@ export default function IndexTabPanels({
             historyLoading={vm.history.historyLoading}
             historyQuery={vm.history.historyQuery}
             onClearHistory={() => void vm.history.clearHistory()}
-            onCopyHistoryEntry={(entry) => void vm.history.copyHistoryEntry(entry)}
+            onCopyHistoryEntry={(entry) =>
+              void vm.history.copyHistoryEntry(entry)
+            }
             onRefreshHistory={() => void vm.history.refreshHistory()}
-            onRemoveHistoryEntry={(id) => void vm.history.removeHistoryEntry(id)}
+            onRemoveHistoryEntry={(id) =>
+              void vm.history.removeHistoryEntry(id)
+            }
             onSetHistoryQuery={vm.history.setHistoryQuery}
           />
         </Suspense>
@@ -121,7 +129,7 @@ export default function IndexTabPanels({
         value="settings"
         className="custom-scrollbar mt-0 h-full min-h-0 overflow-y-auto pr-2 animate-in fade-in slide-in-from-bottom-4 duration-500 outline-none"
       >
-        <Suspense fallback={tabFallback('Configurações')}>
+        <Suspense fallback={tabFallback("Configurações")}>
           <SettingsTab
             theme={theme}
             onSetTheme={onSetTheme}
@@ -135,7 +143,9 @@ export default function IndexTabPanels({
             adaptiveSuggestions={vm.adaptive.suggestions}
             adaptiveSuggestionsBusyId={vm.adaptive.busyId}
             adaptiveSuggestionsLoading={vm.adaptive.loading}
-            captureBlockedReason={vm.voiceSession.runtimeInfo.captureBlockedReason}
+            captureBlockedReason={
+              vm.voiceSession.runtimeInfo.captureBlockedReason
+            }
             dualLanguageStrategy={vm.appSettings.dualLanguageStrategy}
             formatCommandsEnabled={vm.appSettings.formatCommandsEnabled}
             hasDesktopApi={hasDesktopApi}
@@ -151,11 +161,17 @@ export default function IndexTabPanels({
             micDeviceId={vm.voiceSession.micDeviceId}
             micDevices={vm.voiceSession.micDevices}
             micInputGain={vm.voiceSession.micInputGain}
-            onClearAzureCredentials={() => void vm.appSettings.clearAzureCredentials()}
+            onClearAzureCredentials={() =>
+              void vm.appSettings.clearAzureCredentials()
+            }
             onChangeLatencyProfile={vm.appSettings.setLatencyProfile}
             onChangeToneMode={vm.appSettings.setToneMode}
-            onSaveAzureCredentials={() => void vm.appSettings.saveAzureCredentials()}
-            onSaveComprehensionSettings={() => void vm.appSettings.saveSettings()}
+            onSaveAzureCredentials={() =>
+              void vm.appSettings.saveAzureCredentials()
+            }
+            onSaveComprehensionSettings={() =>
+              void vm.appSettings.saveSettings()
+            }
             onSetAppProfilesText={vm.appSettings.setAppProfilesText}
             onSetAzureKey={vm.appSettings.setAzureKey}
             onSetAzureRegion={vm.appSettings.setAzureRegion}
@@ -165,11 +181,15 @@ export default function IndexTabPanels({
             onSetHistoryEnabled={vm.appSettings.setHistoryEnabled}
             onSetHistoryRetentionDays={vm.appSettings.setHistoryRetentionDays}
             onSetHistoryStorageMode={vm.appSettings.setHistoryStorageMode}
-            onSetAdaptiveLearningEnabled={vm.appSettings.setAdaptiveLearningEnabled}
+            onSetAdaptiveLearningEnabled={
+              vm.appSettings.setAdaptiveLearningEnabled
+            }
             onSetHotkeyFallback={vm.appSettings.setHotkeyFallback}
             onSetHotkeyPrimary={vm.appSettings.setHotkeyPrimary}
             onSetInputGain={vm.voiceSession.setMicInputGain}
-            onSetIntentDetectionEnabled={vm.appSettings.setIntentDetectionEnabled}
+            onSetIntentDetectionEnabled={
+              vm.appSettings.setIntentDetectionEnabled
+            }
             onSetLanguageMode={vm.appSettings.setLanguageMode}
             onSetLowConfidencePolicy={vm.appSettings.setLowConfidencePolicy}
             onSetMaxSessionSeconds={vm.appSettings.setMaxSessionSeconds}
@@ -179,8 +199,12 @@ export default function IndexTabPanels({
             onSetProtectedTermsText={vm.appSettings.setProtectedTermsText}
             onSetRewriteEnabled={vm.appSettings.setRewriteEnabled}
             onSetRewriteMode={vm.appSettings.setRewriteMode}
-            onTestAzureCredentials={() => void vm.appSettings.testAzureCredentials()}
-            onApplyAdaptiveSuggestion={(suggestion) => void vm.adaptive.applySuggestion(suggestion)}
+            onTestAzureCredentials={() =>
+              void vm.appSettings.testAzureCredentials()
+            }
+            onApplyAdaptiveSuggestion={(suggestion) =>
+              void vm.adaptive.applySuggestion(suggestion)
+            }
             onDismissAdaptiveSuggestion={(suggestion) =>
               void vm.adaptive.dismissSuggestion(suggestion)
             }

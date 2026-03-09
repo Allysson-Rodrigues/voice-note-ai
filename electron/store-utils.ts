@@ -1,5 +1,12 @@
-import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
+import {
+  copyFile,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import path from "node:path";
 
 export const STORE_SCHEMA_VERSION = 1;
 
@@ -15,14 +22,17 @@ export function wrapStoreEnvelope<T>(data: T): StoreEnvelope<T> {
   };
 }
 
-export function unwrapStoreEnvelope<T>(raw: unknown): { version: number; data: T } {
+export function unwrapStoreEnvelope<T>(raw: unknown): {
+  version: number;
+  data: T;
+} {
   if (
     raw &&
-    typeof raw === 'object' &&
+    typeof raw === "object" &&
     !Array.isArray(raw) &&
-    'version' in raw &&
-    typeof (raw as { version?: unknown }).version === 'number' &&
-    'data' in raw
+    "version" in raw &&
+    typeof (raw as { version?: unknown }).version === "number" &&
+    "data" in raw
   ) {
     return {
       version: Math.max(0, Math.round((raw as { version: number }).version)),
@@ -42,10 +52,10 @@ export function getBackupFilePath(filePath: string) {
 
 async function readTextIfExists(filePath: string) {
   try {
-    return await readFile(filePath, 'utf8');
+    return await readFile(filePath, "utf8");
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return null;
+    if (code === "ENOENT") return null;
     throw error;
   }
 }
@@ -74,10 +84,10 @@ export async function writeTextFileAtomic(filePath: string, content: string) {
     await copyFile(filePath, backupPath);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') throw error;
+    if (code !== "ENOENT") throw error;
   }
 
-  await writeFile(tempPath, content, 'utf8');
+  await writeFile(tempPath, content, "utf8");
 
   try {
     await rm(filePath, { force: true });
@@ -91,21 +101,21 @@ export async function writeTextFileAtomic(filePath: string, content: string) {
 
     const backupContent = await readTextIfExists(backupPath);
     if (backupContent != null) {
-      await writeFile(filePath, backupContent, 'utf8');
+      await writeFile(filePath, backupContent, "utf8");
     }
 
     throw error;
   }
 }
 
-export async function quarantineFile(filePath: string, suffix = 'corrupt') {
+export async function quarantineFile(filePath: string, suffix = "corrupt") {
   const targetPath = `${filePath}.${suffix}.${Date.now()}`;
   try {
     await rename(filePath, targetPath);
     return targetPath;
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT') return null;
+    if (code === "ENOENT") return null;
     throw error;
   }
 }

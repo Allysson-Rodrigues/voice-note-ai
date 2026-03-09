@@ -1,30 +1,44 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import Index from '@/pages/Index';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import Index from "@/pages/Index";
 
 const startCaptureMock = vi.fn(
-  async (_sessionId: string, _deviceId?: string | null, _inputGain?: number) => undefined,
+  async (_sessionId: string, _deviceId?: string | null, _inputGain?: number) =>
+    undefined,
 );
 const stopCaptureMock = vi.fn(async () => undefined);
 const warmupCapturePipelineMock = vi.fn(async () => undefined);
-const primeMicrophoneMock = vi.fn(async (_deviceId?: string | null) => undefined);
+const primeMicrophoneMock = vi.fn(
+  async (_deviceId?: string | null) => undefined,
+);
 const setInputGainMock = vi.fn((_value: number) => undefined);
 
-vi.mock('@/audio/capture', async () => {
-  const actual = await vi.importActual<typeof import('@/audio/capture')>('@/audio/capture');
+vi.mock("@/audio/capture", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/audio/capture")>("@/audio/capture");
   return {
     ...actual,
     onCaptureIssue: () => () => {},
-    primeMicrophone: (deviceId?: string | null) => primeMicrophoneMock(deviceId),
+    primeMicrophone: (deviceId?: string | null) =>
+      primeMicrophoneMock(deviceId),
     setInputGain: (value: number) => setInputGainMock(value),
-    startCapture: (sessionId: string, deviceId?: string | null, inputGain?: number) =>
-      startCaptureMock(sessionId, deviceId, inputGain),
+    startCapture: (
+      sessionId: string,
+      deviceId?: string | null,
+      inputGain?: number,
+    ) => startCaptureMock(sessionId, deviceId, inputGain),
     stopCapture: () => stopCaptureMock(),
     warmupCapturePipeline: () => warmupCapturePipelineMock(),
   };
 });
 
-describe('voice session lifecycle', () => {
+describe("voice session lifecycle", () => {
   beforeEach(() => {
     startCaptureMock.mockClear();
     stopCaptureMock.mockClear();
@@ -33,7 +47,7 @@ describe('voice session lifecycle', () => {
     setInputGainMock.mockClear();
   });
 
-  it('mantem a sessao ativa ao trocar de aba', async () => {
+  it("mantem a sessao ativa ao trocar de aba", async () => {
     const startStt = vi.fn(async () => ({ ok: true }));
     const stopStt = vi.fn(async () => ({ ok: true }));
     const getHealthCheck = vi.fn(async () => ({
@@ -41,10 +55,11 @@ describe('voice session lifecycle', () => {
       items: [],
     }));
 
-    let captureStartHandler: ((payload: { sessionId: string }) => Promise<void> | void) | null =
-      null;
+    let captureStartHandler:
+      | ((payload: { sessionId: string }) => Promise<void> | void)
+      | null = null;
 
-    Object.defineProperty(window, 'voiceNoteAI', {
+    Object.defineProperty(window, "voiceNoteAI", {
       configurable: true,
       value: {
         windowMinimize: () => {},
@@ -53,30 +68,33 @@ describe('voice session lifecycle', () => {
         isWindowMaximized: async () => false,
         onMaximizedChange: () => () => {},
         listDictionary: async () => [],
-        exportDictionary: async () => ({ exportedAt: new Date().toISOString(), terms: [] }),
+        exportDictionary: async () => ({
+          exportedAt: new Date().toISOString(),
+          terms: [],
+        }),
         importDictionary: async () => ({ ok: true, count: 0 }),
         listHistory: async () => [],
         removeHistoryEntry: async () => ({ ok: true }),
         clearHistory: async () => ({ ok: true, removed: 0 }),
         addDictionaryTerm: async () => ({
           ok: true,
-          term: { id: '1', term: 'standup', enabled: true, createdAt: '' },
+          term: { id: "1", term: "standup", enabled: true, createdAt: "" },
         }),
         updateDictionaryTerm: async () => ({
           ok: true,
-          term: { id: '1', term: 'standup', enabled: true, createdAt: '' },
+          term: { id: "1", term: "standup", enabled: true, createdAt: "" },
         }),
         removeDictionaryTerm: async () => ({ ok: true }),
         startStt,
         sendAudio: () => {},
         stopStt,
         getSettings: async () => ({
-          hotkeyPrimary: 'CommandOrControl+Super',
-          hotkeyFallback: 'CommandOrControl+Super+Space',
+          hotkeyPrimary: "CommandOrControl+Super",
+          hotkeyFallback: "CommandOrControl+Super+Space",
           autoPasteEnabled: false,
-          toneMode: 'casual',
-          languageMode: 'pt-BR',
-          sttProvider: 'azure',
+          toneMode: "casual",
+          languageMode: "pt-BR",
+          sttProvider: "azure",
           extraPhrases: [],
           canonicalTerms: [],
           stopGraceMs: 200,
@@ -85,46 +103,46 @@ describe('voice session lifecycle', () => {
           historyEnabled: true,
           historyRetentionDays: 30,
           privacyMode: false,
-          historyStorageMode: 'plain',
-          postprocessProfile: 'balanced',
-          dualLanguageStrategy: 'fallback-on-low-confidence',
+          historyStorageMode: "plain",
+          postprocessProfile: "balanced",
+          dualLanguageStrategy: "fallback-on-low-confidence",
           rewriteEnabled: true,
-          rewriteMode: 'safe',
+          rewriteMode: "safe",
           intentDetectionEnabled: true,
           protectedTerms: [],
-          lowConfidencePolicy: 'review',
+          lowConfidencePolicy: "review",
           adaptiveLearningEnabled: true,
           appProfiles: {},
         }),
         getRuntimeInfo: async () => ({
-          hotkeyLabel: 'Ctrl+Win',
-          hotkeyMode: 'hold',
+          hotkeyLabel: "Ctrl+Win",
+          hotkeyMode: "hold",
           holdToTalkActive: true,
           holdRequired: true,
         }),
         getAzureCredentialStatus: async () => ({
-          source: 'missing',
-          storageMode: 'none',
+          source: "missing",
+          storageMode: "none",
           hasStoredCredentials: false,
           encryptionAvailable: true,
           canPersistSecurely: true,
         }),
         testAzureCredentials: async () => ({
-          status: 'ok',
-          message: 'ok',
-          host: 'brazilsouth.api.cognitive.microsoft.com',
+          status: "ok",
+          message: "ok",
+          host: "brazilsouth.api.cognitive.microsoft.com",
         }),
         saveAzureCredentials: async () => ({
-          source: 'secure-store',
-          storageMode: 'encrypted',
+          source: "secure-store",
+          storageMode: "encrypted",
           hasStoredCredentials: true,
           encryptionAvailable: true,
           canPersistSecurely: true,
-          region: 'brazilsouth',
+          region: "brazilsouth",
         }),
         clearAzureCredentials: async () => ({
-          source: 'missing',
-          storageMode: 'none',
+          source: "missing",
+          storageMode: "none",
           hasStoredCredentials: false,
           encryptionAvailable: true,
           canPersistSecurely: true,
@@ -148,17 +166,19 @@ describe('voice session lifecycle', () => {
         applyAdaptiveSuggestion: async () => ({ ok: true }),
         dismissAdaptiveSuggestion: async () => ({ ok: true }),
         getRecentLogs: async () => [],
-        retryHoldHook: async () => ({ ok: true, message: 'ok' }),
+        retryHoldHook: async () => ({ ok: true, message: "ok" }),
         updateSettings: async () => ({ ok: true, settings: {} }),
         setAutoPasteEnabled: async () => ({ ok: true }),
-        setToneMode: async (mode: 'formal' | 'casual' | 'very-casual') => ({
+        setToneMode: async (mode: "formal" | "casual" | "very-casual") => ({
           ok: true,
           toneMode: mode,
         }),
         onHudState: () => () => {},
         onHudLevel: () => () => {},
         onHudHover: () => () => {},
-        onCaptureStart: (cb: (payload: { sessionId: string }) => Promise<void> | void) => {
+        onCaptureStart: (
+          cb: (payload: { sessionId: string }) => Promise<void> | void,
+        ) => {
           captureStartHandler = cb;
           return () => {
             captureStartHandler = null;
@@ -177,33 +197,40 @@ describe('voice session lifecycle', () => {
     await waitFor(() => expect(captureStartHandler).not.toBeNull());
 
     await act(async () => {
-      await captureStartHandler?.({ sessionId: 'sessao-1' });
+      await captureStartHandler?.({ sessionId: "sessao-1" });
     });
 
-    await waitFor(() => expect(startStt).toHaveBeenCalledWith({ sessionId: 'sessao-1' }));
+    await waitFor(() =>
+      expect(startStt).toHaveBeenCalledWith({ sessionId: "sessao-1" }),
+    );
     expect(stopStt).not.toHaveBeenCalled();
     expect(stopCaptureMock).not.toHaveBeenCalled();
 
-    const settingsTab = screen.getByRole('tab', { name: 'Configurações' });
+    const settingsTab = screen.getByRole("tab", { name: "Configurações" });
     fireEvent.mouseDown(settingsTab);
     fireEvent.click(settingsTab);
 
-    await waitFor(() => expect(settingsTab).toHaveAttribute('aria-selected', 'true'));
+    await waitFor(() =>
+      expect(settingsTab).toHaveAttribute("aria-selected", "true"),
+    );
     expect(stopStt).not.toHaveBeenCalled();
     expect(stopCaptureMock).not.toHaveBeenCalled();
   });
 
-  it('nao inicia a sessao STT quando o microfone e negado', async () => {
+  it("nao inicia a sessao STT quando o microfone e negado", async () => {
     startCaptureMock.mockRejectedValueOnce(
-      Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }),
+      Object.assign(new Error("Permission denied"), {
+        name: "NotAllowedError",
+      }),
     );
 
     const startStt = vi.fn(async () => ({ ok: true }));
 
-    let captureStartHandler: ((payload: { sessionId: string }) => Promise<void> | void) | null =
-      null;
+    let captureStartHandler:
+      | ((payload: { sessionId: string }) => Promise<void> | void)
+      | null = null;
 
-    Object.defineProperty(window, 'voiceNoteAI', {
+    Object.defineProperty(window, "voiceNoteAI", {
       configurable: true,
       value: {
         windowMinimize: () => {},
@@ -212,30 +239,33 @@ describe('voice session lifecycle', () => {
         isWindowMaximized: async () => false,
         onMaximizedChange: () => () => {},
         listDictionary: async () => [],
-        exportDictionary: async () => ({ exportedAt: new Date().toISOString(), terms: [] }),
+        exportDictionary: async () => ({
+          exportedAt: new Date().toISOString(),
+          terms: [],
+        }),
         importDictionary: async () => ({ ok: true, count: 0 }),
         listHistory: async () => [],
         removeHistoryEntry: async () => ({ ok: true }),
         clearHistory: async () => ({ ok: true, removed: 0 }),
         addDictionaryTerm: async () => ({
           ok: true,
-          term: { id: '1', term: 'standup', enabled: true, createdAt: '' },
+          term: { id: "1", term: "standup", enabled: true, createdAt: "" },
         }),
         updateDictionaryTerm: async () => ({
           ok: true,
-          term: { id: '1', term: 'standup', enabled: true, createdAt: '' },
+          term: { id: "1", term: "standup", enabled: true, createdAt: "" },
         }),
         removeDictionaryTerm: async () => ({ ok: true }),
         startStt,
         sendAudio: () => {},
         stopStt: async () => ({ ok: true }),
         getSettings: async () => ({
-          hotkeyPrimary: 'CommandOrControl+Super',
-          hotkeyFallback: 'CommandOrControl+Super+Space',
+          hotkeyPrimary: "CommandOrControl+Super",
+          hotkeyFallback: "CommandOrControl+Super+Space",
           autoPasteEnabled: false,
-          toneMode: 'casual',
-          languageMode: 'pt-BR',
-          sttProvider: 'azure',
+          toneMode: "casual",
+          languageMode: "pt-BR",
+          sttProvider: "azure",
           extraPhrases: [],
           canonicalTerms: [],
           stopGraceMs: 200,
@@ -244,46 +274,46 @@ describe('voice session lifecycle', () => {
           historyEnabled: true,
           historyRetentionDays: 30,
           privacyMode: false,
-          historyStorageMode: 'plain',
-          postprocessProfile: 'balanced',
-          dualLanguageStrategy: 'fallback-on-low-confidence',
+          historyStorageMode: "plain",
+          postprocessProfile: "balanced",
+          dualLanguageStrategy: "fallback-on-low-confidence",
           rewriteEnabled: true,
-          rewriteMode: 'safe',
+          rewriteMode: "safe",
           intentDetectionEnabled: true,
           protectedTerms: [],
-          lowConfidencePolicy: 'review',
+          lowConfidencePolicy: "review",
           adaptiveLearningEnabled: true,
           appProfiles: {},
         }),
         getRuntimeInfo: async () => ({
-          hotkeyLabel: 'Ctrl+Win',
-          hotkeyMode: 'hold',
+          hotkeyLabel: "Ctrl+Win",
+          hotkeyMode: "hold",
           holdToTalkActive: true,
           holdRequired: true,
         }),
         getAzureCredentialStatus: async () => ({
-          source: 'missing',
-          storageMode: 'none',
+          source: "missing",
+          storageMode: "none",
           hasStoredCredentials: false,
           encryptionAvailable: true,
           canPersistSecurely: true,
         }),
         testAzureCredentials: async () => ({
-          status: 'ok',
-          message: 'ok',
-          host: 'brazilsouth.api.cognitive.microsoft.com',
+          status: "ok",
+          message: "ok",
+          host: "brazilsouth.api.cognitive.microsoft.com",
         }),
         saveAzureCredentials: async () => ({
-          source: 'secure-store',
-          storageMode: 'encrypted',
+          source: "secure-store",
+          storageMode: "encrypted",
           hasStoredCredentials: true,
           encryptionAvailable: true,
           canPersistSecurely: true,
-          region: 'brazilsouth',
+          region: "brazilsouth",
         }),
         clearAzureCredentials: async () => ({
-          source: 'missing',
-          storageMode: 'none',
+          source: "missing",
+          storageMode: "none",
           hasStoredCredentials: false,
           encryptionAvailable: true,
           canPersistSecurely: true,
@@ -310,17 +340,19 @@ describe('voice session lifecycle', () => {
         applyAdaptiveSuggestion: async () => ({ ok: true }),
         dismissAdaptiveSuggestion: async () => ({ ok: true }),
         getRecentLogs: async () => [],
-        retryHoldHook: async () => ({ ok: true, message: 'ok' }),
+        retryHoldHook: async () => ({ ok: true, message: "ok" }),
         updateSettings: async () => ({ ok: true, settings: {} }),
         setAutoPasteEnabled: async () => ({ ok: true }),
-        setToneMode: async (mode: 'formal' | 'casual' | 'very-casual') => ({
+        setToneMode: async (mode: "formal" | "casual" | "very-casual") => ({
           ok: true,
           toneMode: mode,
         }),
         onHudState: () => () => {},
         onHudLevel: () => () => {},
         onHudHover: () => () => {},
-        onCaptureStart: (cb: (payload: { sessionId: string }) => Promise<void> | void) => {
+        onCaptureStart: (
+          cb: (payload: { sessionId: string }) => Promise<void> | void,
+        ) => {
           captureStartHandler = cb;
           return () => {
             captureStartHandler = null;
@@ -339,13 +371,19 @@ describe('voice session lifecycle', () => {
     await waitFor(() => expect(captureStartHandler).not.toBeNull());
 
     await act(async () => {
-      await captureStartHandler?.({ sessionId: 'sessao-permissao' });
+      await captureStartHandler?.({ sessionId: "sessao-permissao" });
     });
 
     await waitFor(() => {
-      expect(startCaptureMock).toHaveBeenCalledWith('sessao-permissao', null, 1);
+      expect(startCaptureMock).toHaveBeenCalledWith(
+        "sessao-permissao",
+        null,
+        1,
+      );
     });
     expect(startStt).not.toHaveBeenCalled();
-    expect(screen.getByText(/Permissão de microfone negada/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Permissão de microfone negada/i),
+    ).toBeInTheDocument();
   });
 });

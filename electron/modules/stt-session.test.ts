@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSttSessionManager } from './stt-session.js';
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createSttSessionManager } from "./stt-session.js";
 
 const providerState = vi.hoisted(() => {
   const provider = {
@@ -12,7 +12,7 @@ const providerState = vi.hoisted(() => {
   return { provider };
 });
 
-vi.mock('./stt/stt-factory.js', () => ({
+vi.mock("./stt/stt-factory.js", () => ({
   createSttProvider: vi.fn(() => providerState.provider),
 }));
 
@@ -21,7 +21,10 @@ function createIpcMainMock() {
     string,
     (event: { sender: { id: number } }, payload: unknown) => Promise<unknown>
   >();
-  const events = new Map<string, (event: { sender: { id: number } }, payload: unknown) => void>();
+  const events = new Map<
+    string,
+    (event: { sender: { id: number } }, payload: unknown) => void
+  >();
 
   return {
     ipcMain: {
@@ -37,19 +40,21 @@ function createIpcMainMock() {
   };
 }
 
-function createManager(overrides: Partial<Parameters<typeof createSttSessionManager>[0]> = {}) {
+function createManager(
+  overrides: Partial<Parameters<typeof createSttSessionManager>[0]> = {},
+) {
   return createSttSessionManager({
     isPackagedApp: false,
     getSettings: () => ({
       stopGraceMs: 200,
       maxSessionSeconds: 90,
       extraPhrases: [],
-      languageMode: 'pt-BR',
-      dualLanguageStrategy: 'fallback-on-low-confidence',
+      languageMode: "pt-BR",
+      dualLanguageStrategy: "fallback-on-low-confidence",
     }),
     getAzureCredentials: () => ({
-      key: 'key',
-      region: 'brazilsouth',
+      key: "key",
+      region: "brazilsouth",
     }),
     getCaptureBlockedReason: () => null,
     broadcast: vi.fn(),
@@ -58,9 +63,9 @@ function createManager(overrides: Partial<Parameters<typeof createSttSessionMana
     postprocessTranscript: vi.fn(async ({ rawText }) => ({
       text: rawText,
       appliedRules: [],
-      intent: 'free-text',
+      intent: "free-text",
       rewriteApplied: false,
-      rewriteRisk: 'low',
+      rewriteRisk: "low",
     })),
     getMainWindow: () =>
       ({
@@ -86,7 +91,7 @@ function createDeferred<T>() {
   return { promise, resolve, reject };
 }
 
-describe('stt session security', () => {
+describe("stt session security", () => {
   beforeEach(() => {
     providerState.provider.start.mockClear();
     providerState.provider.prewarm.mockClear();
@@ -95,77 +100,77 @@ describe('stt session security', () => {
     providerState.provider.close.mockClear();
   });
 
-  it('reuses the prewarmed provider on the first start', async () => {
+  it("reuses the prewarmed provider on the first start", async () => {
     const manager = createManager();
     await manager.prewarmStt();
 
     const { ipcMain, handles } = createIpcMainMock();
     manager.registerIpcHandlers(ipcMain as never);
 
-    const start = handles.get('stt:start');
-    await start?.({ sender: { id: 1 } }, { sessionId: 'session-prewarm' });
+    const start = handles.get("stt:start");
+    await start?.({ sender: { id: 1 } }, { sessionId: "session-prewarm" });
 
     expect(providerState.provider.prewarm).toHaveBeenCalledTimes(1);
     expect(providerState.provider.start).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores audio from a renderer that does not own the active session', async () => {
+  it("ignores audio from a renderer that does not own the active session", async () => {
     const manager = createManager();
     const { ipcMain, handles, events } = createIpcMainMock();
     manager.registerIpcHandlers(ipcMain as never);
 
-    const start = handles.get('stt:start');
-    const audio = events.get('stt:audio');
+    const start = handles.get("stt:start");
+    const audio = events.get("stt:audio");
 
     expect(start).toBeDefined();
     expect(audio).toBeDefined();
 
-    await start?.({ sender: { id: 1 } }, { sessionId: 'session-1' });
+    await start?.({ sender: { id: 1 } }, { sessionId: "session-1" });
     audio?.(
       { sender: { id: 2 } },
-      { sessionId: 'session-1', pcm16kMonoInt16: new Uint8Array([1, 2, 3, 4]) },
+      { sessionId: "session-1", pcm16kMonoInt16: new Uint8Array([1, 2, 3, 4]) },
     );
 
     expect(providerState.provider.writeAudio).not.toHaveBeenCalled();
   });
 
-  it('drops audio chunks that violate the minimum chunk interval', async () => {
+  it("drops audio chunks that violate the minimum chunk interval", async () => {
     const manager = createManager();
     const { ipcMain, handles, events } = createIpcMainMock();
     manager.registerIpcHandlers(ipcMain as never);
 
-    const start = handles.get('stt:start');
-    const audio = events.get('stt:audio');
+    const start = handles.get("stt:start");
+    const audio = events.get("stt:audio");
 
-    await start?.({ sender: { id: 1 } }, { sessionId: 'session-2' });
+    await start?.({ sender: { id: 1 } }, { sessionId: "session-2" });
     audio?.(
       { sender: { id: 1 } },
-      { sessionId: 'session-2', pcm16kMonoInt16: new Uint8Array([1, 2, 3, 4]) },
+      { sessionId: "session-2", pcm16kMonoInt16: new Uint8Array([1, 2, 3, 4]) },
     );
     audio?.(
       { sender: { id: 1 } },
-      { sessionId: 'session-2', pcm16kMonoInt16: new Uint8Array([5, 6, 7, 8]) },
+      { sessionId: "session-2", pcm16kMonoInt16: new Uint8Array([5, 6, 7, 8]) },
     );
 
     expect(providerState.provider.writeAudio).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects stop requests from a renderer that does not own the active session', async () => {
+  it("rejects stop requests from a renderer that does not own the active session", async () => {
     const manager = createManager();
     const { ipcMain, handles } = createIpcMainMock();
     manager.registerIpcHandlers(ipcMain as never);
 
-    const start = handles.get('stt:start');
-    const stop = handles.get('stt:stop');
+    const start = handles.get("stt:start");
+    const stop = handles.get("stt:stop");
 
-    await start?.({ sender: { id: 1 } }, { sessionId: 'session-3' });
+    await start?.({ sender: { id: 1 } }, { sessionId: "session-3" });
 
-    await expect(stop?.({ sender: { id: 2 } }, { sessionId: 'session-3' })).rejects.toThrow(
-      /owns the active session/i,
-    );
+    await expect(
+      stop?.({ sender: { id: 2 } }, { sessionId: "session-3" }),
+    ).rejects.toThrow(/owns the active session/i);
   });
 
-  it('blocks a second start while the first session is still starting', async () => {
+  it("blocks a second start while the first session is still starting", async () => {
     const deferredStart = createDeferred<void>();
     providerState.provider.start.mockImplementationOnce(async () => {
       await deferredStart.promise;
@@ -175,22 +180,25 @@ describe('stt session security', () => {
     const { ipcMain, handles } = createIpcMainMock();
     manager.registerIpcHandlers(ipcMain as never);
 
-    const start = handles.get('stt:start');
-    const firstStart = start?.({ sender: { id: 1 } }, { sessionId: 'session-4' });
+    const start = handles.get("stt:start");
+    const firstStart = start?.(
+      { sender: { id: 1 } },
+      { sessionId: "session-4" },
+    );
 
     await vi.waitFor(() => {
       expect(providerState.provider.start).toHaveBeenCalledTimes(1);
     });
 
-    await expect(start?.({ sender: { id: 1 } }, { sessionId: 'session-5' })).rejects.toThrow(
-      /session is already active/i,
-    );
+    await expect(
+      start?.({ sender: { id: 1 } }, { sessionId: "session-5" }),
+    ).rejects.toThrow(/session is already active/i);
 
     deferredStart.resolve();
     await firstStart;
   });
 
-  it('encerra a captura quando a sessao ultrapassa o tempo maximo', async () => {
+  it("encerra a captura quando a sessao ultrapassa o tempo maximo", async () => {
     vi.useFakeTimers();
     const mainWindow = {
       isDestroyed: () => false,
@@ -203,12 +211,12 @@ describe('stt session security', () => {
         stopGraceMs: 200,
         maxSessionSeconds: 30,
         extraPhrases: [],
-        languageMode: 'pt-BR',
-        dualLanguageStrategy: 'fallback-on-low-confidence',
+        languageMode: "pt-BR",
+        dualLanguageStrategy: "fallback-on-low-confidence",
       }),
       getAzureCredentials: () => ({
-        key: 'key',
-        region: 'brazilsouth',
+        key: "key",
+        region: "brazilsouth",
       }),
       getCaptureBlockedReason: () => null,
       broadcast: vi.fn(),
@@ -225,64 +233,72 @@ describe('stt session security', () => {
     const { ipcMain, handles } = createIpcMainMock();
     manager.registerIpcHandlers(ipcMain as never);
 
-    const start = handles.get('stt:start');
-    await start?.({ sender: { id: 1 } }, { sessionId: 'timeout-1' });
+    const start = handles.get("stt:start");
+    await start?.({ sender: { id: 1 } }, { sessionId: "timeout-1" });
 
     await vi.advanceTimersByTimeAsync(30_000);
 
-    expect(mainWindow.webContents.send).toHaveBeenCalledWith('capture:stop', {
-      sessionId: 'timeout-1',
+    expect(mainWindow.webContents.send).toHaveBeenCalledWith("capture:stop", {
+      sessionId: "timeout-1",
     });
-    expect(setHudState).toHaveBeenCalledWith(expect.objectContaining({ state: 'error' }));
+    expect(setHudState).toHaveBeenCalledWith(
+      expect.objectContaining({ state: "error" }),
+    );
     vi.useRealTimers();
   });
 
-  it('libera a sessao ativa quando o provider emite erro e permite novo inicio', async () => {
+  it("libera a sessao ativa quando o provider emite erro e permite novo inicio", async () => {
     const manager = createManager();
     const { ipcMain, handles } = createIpcMainMock();
     manager.registerIpcHandlers(ipcMain as never);
 
-    const start = handles.get('stt:start');
-    await start?.({ sender: { id: 1 } }, { sessionId: 'session-error' });
+    const start = handles.get("stt:start");
+    await start?.({ sender: { id: 1 } }, { sessionId: "session-error" });
 
     const callbacks = providerState.provider.start.mock.calls[0]?.[3];
-    callbacks?.onError('session-error', 'provider fault');
+    callbacks?.onError("session-error", "provider fault");
 
     await vi.waitFor(() => {
-      expect(providerState.provider.stop).toHaveBeenCalledWith('session-error');
+      expect(providerState.provider.stop).toHaveBeenCalledWith("session-error");
     });
 
-    await expect(start?.({ sender: { id: 1 } }, { sessionId: 'session-next' })).resolves.toEqual({
+    await expect(
+      start?.({ sender: { id: 1 } }, { sessionId: "session-next" }),
+    ).resolves.toEqual({
       ok: true,
     });
   });
 
-  it('forca copy-only quando a politica de baixa confianca exige revisao', async () => {
+  it("forca copy-only quando a politica de baixa confianca exige revisao", async () => {
     const injectText = vi.fn(async () => ({ pasted: false, method: null }));
     const manager = createManager({
       injectText,
-      resolveLowConfidencePolicy: () => 'review',
+      resolveLowConfidencePolicy: () => "review",
     });
     const { ipcMain, handles } = createIpcMainMock();
     manager.registerIpcHandlers(ipcMain as never);
 
-    const start = handles.get('stt:start');
-    const stop = handles.get('stt:stop');
+    const start = handles.get("stt:start");
+    const stop = handles.get("stt:stop");
 
-    await start?.({ sender: { id: 1 } }, { sessionId: 'session-review' });
+    await start?.({ sender: { id: 1 } }, { sessionId: "session-review" });
     const callbacks = providerState.provider.start.mock.calls[0]?.[3];
-    callbacks?.onRecognized('session-review', {
-      text: 'texto para revisar',
-      language: 'pt-BR',
+    callbacks?.onRecognized("session-review", {
+      text: "texto para revisar",
+      language: "pt-BR",
       confidence: 0.42,
     });
 
-    await expect(stop?.({ sender: { id: 1 } }, { sessionId: 'session-review' })).resolves.toEqual(
+    await expect(
+      stop?.({ sender: { id: 1 } }, { sessionId: "session-review" }),
+    ).resolves.toEqual(
       expect.objectContaining({
         ok: true,
-        message: 'Texto copiado para revisão antes de colar.',
+        message: "Texto copiado para revisão antes de colar.",
       }),
     );
-    expect(injectText).toHaveBeenCalledWith('texto para revisar', null, { forceCopyOnly: true });
+    expect(injectText).toHaveBeenCalledWith("texto para revisar", null, {
+      forceCopyOnly: true,
+    });
   });
 });
