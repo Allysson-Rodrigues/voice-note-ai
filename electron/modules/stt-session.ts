@@ -6,13 +6,14 @@ import {
   validateSttStopPayload,
 } from "../ipc-validation.js";
 import { logInfo, logPerf, logWarn } from "../logger.js";
-import { createSttProvider } from "./stt/stt-factory.js";
 import type { SttProvider } from "./stt/types.js";
 import {
   HUD_ERROR_VISIBLE_MS,
   HUD_SUCCESS_VISIBLE_MS,
-  buildSessionCompletedEntry,
   clamp,
+  createAzureSpeechProvider,
+  createSessionRecord,
+  finalizeStoppedSession,
   getAzureConfigSignature,
   type HudState,
   resolveCompletionMessage,
@@ -21,6 +22,7 @@ import {
   type SttSession,
   type SttSessionManager,
   type SttSessionManagerOptions,
+  writeSessionAudioChunk,
 } from "./stt-session-support.js";
 
 export function createSttSessionManager(
@@ -185,10 +187,7 @@ export function createSttSessionManager(
       prewarmedConfigSignature = null;
     }
 
-    const provider = createSttProvider("azure", azureConfig, async () => {
-      const mod = await import("microsoft-cognitiveservices-speech-sdk");
-      return mod.default || mod;
-    });
+    const provider = createAzureSpeechProvider(azureConfig);
 
     prewarmPromise = (async () => {
       try {
@@ -263,32 +262,17 @@ export function createSttSessionManager(
         }
 
         const provider =
-          prewarmedProvider ??
-          createSttProvider("azure", azureConfig, async () => {
-            const mod = await import("microsoft-cognitiveservices-speech-sdk");
-            return mod.default || mod;
-          });
+          prewarmedProvider ?? createAzureSpeechProvider(azureConfig);
         prewarmedProvider = null;
         prewarmedConfigSignature = null;
 
-        const session: SttSession = {
+        const session = createSessionRecord({
           sessionId: payload.sessionId,
           sender,
           provider,
-          startedAtMs: Date.now(),
-          sttReadyAtMs: null,
-          firstPartialAtMs: null,
-          finalAtMs: null,
-          injectAtMs: null,
-          retryCount: 0,
-          ending: false,
           targetWindowHandle,
           appKey,
-          timeoutTimer: null,
-          lastAudioChunkAtMs: null,
-          audioThrottleDrops: 0,
-          timedOut: false,
-        };
+        });
 
         activeSession = session;
         armSessionTimeout(session);
@@ -351,83 +335,11 @@ export function createSttSessionManager(
     options.setHudState({ state: "finalizing" });
 
     try {
-      await session.provider.stop(session.sessionId);
-      session.finalAtMs = Date.now();
-
-      const result = session.lastResult;
-      if (!result || !result.text) {
-        if (session.timedOut) {
-          options.setHudState({
-            state: "error",
-            message: "Sessão encerrada por tempo máximo.",
-          });
-          await sleep(HUD_ERROR_VISIBLE_MS);
-          setHudStateIfCurrent(session.sessionId, { state: "idle" });
-          return {
-            ok: false,
-            text: "",
-            timedOut: true,
-            message: "Sessão encerrada por tempo máximo.",
-          };
-        }
-        setHudStateIfCurrent(session.sessionId, { state: "idle" });
-        return { ok: true, text: "" };
-      }
-
-      const postprocessed = await options.postprocessTranscript({
-        rawText: result.text,
-        language: result.language as "pt-BR" | "en-US",
-        appKey: session.appKey,
-        confidence: result.confidence,
+      return await finalizeStoppedSession({
+        session,
+        options,
+        setHudStateIfCurrent,
       });
-      const lowConfidencePolicy =
-        options.resolveLowConfidencePolicy?.(result.confidence) ?? "paste";
-      const forceCopyOnly =
-        lowConfidencePolicy === "copy-only" || lowConfidencePolicy === "review";
-
-      options.broadcast("stt:final", {
-        sessionId: session.sessionId,
-        text: postprocessed.text,
-      });
-      options.setHudState({ state: "injecting" });
-
-      const targetWindowHandle =
-        await options.resolveInjectionTargetWindowHandle(
-          session.targetWindowHandle,
-        );
-      const injection = await options.injectText(
-        postprocessed.text,
-        targetWindowHandle,
-        {
-          forceCopyOnly,
-        },
-      );
-      session.injectAtMs = Date.now();
-      const completionMessage = resolveCompletionMessage({
-        lowConfidencePolicy,
-        timedOut: session.timedOut,
-      });
-
-      if (options.onSessionCompleted) {
-        await options.onSessionCompleted(
-          buildSessionCompletedEntry({
-            session,
-            result,
-            postprocessed,
-            injection,
-          }),
-        );
-      }
-
-      options.setHudState({ state: "success" });
-      await sleep(HUD_SUCCESS_VISIBLE_MS);
-      setHudStateIfCurrent(session.sessionId, { state: "idle" });
-      return {
-        ok: true,
-        text: postprocessed.text,
-        timedOut: session.timedOut,
-        message: completionMessage,
-      };
     } catch (error) {
       logWarn("failed to stop stt session", { error });
       options.setHudState({ state: "error", message: String(error) });
@@ -477,11 +389,7 @@ export function createSttSessionManager(
         }
 
         activeSession.lastAudioChunkAtMs = now;
-        const pcmBuffer =
-          validated.pcm16kMonoInt16 instanceof Uint8Array
-            ? Buffer.from(validated.pcm16kMonoInt16)
-            : Buffer.from(new Uint8Array(validated.pcm16kMonoInt16));
-        activeSession.provider.writeAudio(validated.sessionId, pcmBuffer);
+        writeSessionAudioChunk(activeSession, validated);
       } catch (error) {
         logWarn("ignored malformed stt audio payload", {
           error: error instanceof Error ? error.message : String(error),

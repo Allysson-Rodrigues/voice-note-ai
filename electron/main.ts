@@ -1,18 +1,8 @@
-import {
-  app,
-  BrowserWindow,
-  globalShortcut,
-  ipcMain,
-  Menu,
-  safeStorage,
-  screen,
-  session,
-  Tray,
-} from "electron";
-import { existsSync } from "node:fs";
+import { app, BrowserWindow, globalShortcut, ipcMain, session } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerAppIpcHandlers } from "./app-ipc.js";
+import { createAppShell } from "./app-shell.js";
 import { createAppStores } from "./app-stores.js";
 import type { PasteAttempt } from "./injection-plan.js";
 import { logError, logInfo } from "./logger.js";
@@ -21,13 +11,8 @@ import {
   getAzureConfigMissingMessage,
 } from "./modules/health-check.js";
 import { createHotkeyService } from "./modules/hotkey.js";
-import { createHudWindowController } from "./modules/hud-window.js";
-import {
-  applyMainWindowBounds,
-  createMainWindow,
-} from "./modules/main-window.js";
+import { createMainWindow } from "./modules/main-window.js";
 import { createSttSessionManager } from "./modules/stt-session.js";
-import type { HudState } from "./modules/stt-session-support.js";
 import { classifyTranscriptIntent } from "./modules/transcript-intent.js";
 import { rewriteTranscript } from "./modules/transcript-rewrite.js";
 import { createTextInjectionService } from "./modules/text-injection.js";
@@ -70,11 +55,8 @@ type RuntimeInfo = {
   captureBlockedReason?: string;
 };
 
-let mainWindow: BrowserWindow | null = null;
-let tray: Tray | null = null;
 let settingsStore: SettingsStore | null = null;
 let isQuitting = false;
-let displayListenersAttached = false;
 let runtimeSecurity = {
   cspEnabled: false,
   permissionsPolicy: "default-deny" as const,
@@ -84,6 +66,20 @@ let settings: AppSettings = createDefaultSettings();
 const stores = createAppStores({
   getSettings: () => settings,
 });
+const appShell = createAppShell({
+  appName: APP_NAME,
+  appDirname: __dirname,
+  devServerUrl: DEV_SERVER_URL,
+  hudEnabled: HUD_ENABLED,
+  hudDebug: HUD_DEBUG,
+  isQuitting: () => isQuitting,
+  requestQuit: () => {
+    isQuitting = true;
+  },
+  onHudHoverChange: (hovered) => {
+    appShell.broadcast("hud:hover", { hovered });
+  },
+});
 
 let runtimeInfo: RuntimeInfo = {
   hotkeyLabel: hotkeyLabelFromAccelerator(settings.hotkeyPrimary),
@@ -91,40 +87,6 @@ let runtimeInfo: RuntimeInfo = {
   holdToTalkActive: false,
   holdRequired: process.platform === "win32",
 };
-
-const hudController = createHudWindowController({
-  enabled: HUD_ENABLED,
-  debug: HUD_DEBUG,
-  devServerUrl: DEV_SERVER_URL,
-  getIconPath,
-  getHudPreloadPath,
-  resolveDistFile: (filename) => path.join(__dirname, "..", "dist", filename),
-  getPreferredDisplay,
-  onHoverChange: (hovered) => {
-    broadcast("hud:hover", { hovered });
-  },
-});
-
-function broadcast(channel: string, payload: unknown) {
-  if (mainWindow && !mainWindow.isDestroyed())
-    mainWindow.webContents.send(channel, payload);
-  const hudWindow = hudController.getHudWindow();
-  if (hudWindow && !hudWindow.isDestroyed())
-    hudWindow.webContents.send(channel, payload);
-}
-
-function setHudState(state: HudState) {
-  broadcast("hud:state", state);
-}
-
-function emitAppError(message: string) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send("app:error", { message });
-  }
-  if (tray) {
-    tray.setToolTip(`${APP_NAME} - ${message}`);
-  }
-}
 
 function updateRuntimeInfo(next: RuntimeInfo) {
   runtimeInfo = next;
@@ -166,70 +128,6 @@ function refreshCaptureBlockedReason() {
   return next;
 }
 
-function getPreferredDisplay() {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    return screen.getDisplayMatching(mainWindow.getBounds());
-  }
-  return screen.getPrimaryDisplay();
-}
-
-function getIconPath() {
-  const candidates = app.isPackaged
-    ? [
-        path.join(app.getAppPath(), "public", "favicon.ico"),
-        path.join(__dirname, "..", "public", "favicon.ico"),
-      ]
-    : [
-        path.join(process.cwd(), "public", "favicon.ico"),
-        path.join(app.getAppPath(), "public", "favicon.ico"),
-        path.join(__dirname, "..", "public", "favicon.ico"),
-      ];
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
-}
-
-function getPreloadPath() {
-  if (!app.isPackaged) {
-    const local = path.join(process.cwd(), "electron", "preload.cjs");
-    if (existsSync(local)) return local;
-  }
-  return path.join(__dirname, "..", "electron", "preload.cjs");
-}
-
-function getHudPreloadPath() {
-  if (!app.isPackaged) {
-    const local = path.join(process.cwd(), "electron", "hud-preload.cjs");
-    if (existsSync(local)) return local;
-  }
-  return path.join(__dirname, "..", "electron", "hud-preload.cjs");
-}
-
-function applyAdaptiveBounds() {
-  const display = getPreferredDisplay();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    applyMainWindowBounds(mainWindow, display.workArea);
-  }
-  hudController.applyHudBounds(display);
-}
-
-function attachDisplayListeners() {
-  if (displayListenersAttached) return;
-  screen.on("display-metrics-changed", applyAdaptiveBounds);
-  screen.on("display-added", applyAdaptiveBounds);
-  screen.on("display-removed", applyAdaptiveBounds);
-  displayListenersAttached = true;
-}
-
-function detachDisplayListeners() {
-  if (!displayListenersAttached) return;
-  screen.removeListener("display-metrics-changed", applyAdaptiveBounds);
-  screen.removeListener("display-added", applyAdaptiveBounds);
-  screen.removeListener("display-removed", applyAdaptiveBounds);
-  displayListenersAttached = false;
-}
-
 function getPreferredInjectionMethod(
   appKey: string | null,
 ): PasteAttempt | null {
@@ -260,8 +158,8 @@ async function rememberInjectionMethod(
 
 const textInjectionService = createTextInjectionService({
   canAutoPaste: () => settings.autoPasteEnabled && process.platform === "win32",
-  getMainWindow: () => mainWindow,
-  getHudWindow: () => hudController.getHudWindow(),
+  getMainWindow: () => appShell.getMainWindow(),
+  getHudWindow: () => appShell.hudController.getHudWindow(),
   getPreferredInjectionMethod,
   rememberInjectionMethod,
 });
@@ -379,11 +277,11 @@ const sttManager = createSttSessionManager({
   getSettings: () => settings,
   getAzureCredentials: () => stores.getResolvedAzureCredentials(),
   getCaptureBlockedReason: () => refreshCaptureBlockedReason(),
-  broadcast,
-  setHudState,
-  emitAppError,
+  broadcast: appShell.broadcast,
+  setHudState: appShell.setHudState,
+  emitAppError: appShell.emitAppError,
   postprocessTranscript,
-  getMainWindow: () => mainWindow,
+  getMainWindow: () => appShell.getMainWindow(),
   getForegroundWindowHandle: textInjectionService.getForegroundWindowHandle,
   getWindowAppKey: textInjectionService.getWindowAppKey,
   resolveInjectionTargetWindowHandle:
@@ -441,22 +339,25 @@ const hotkeyService = createHotkeyService({
   updateRuntimeInfo,
   setRuntimeBlocked,
   refreshCaptureBlockedReason,
-  setHudState,
-  emitAppError,
+  setHudState: appShell.setHudState,
+  emitAppError: appShell.emitAppError,
   sendCaptureStart: (payload) => {
+    const mainWindow = appShell.getMainWindow();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("capture:start", payload);
   },
   sendCaptureStop: (payload) => {
+    const mainWindow = appShell.getMainWindow();
     if (!mainWindow || mainWindow.isDestroyed()) return;
     mainWindow.webContents.send("capture:stop", payload);
   },
   sendSttError: (payload) => {
-    broadcast("stt:error", payload);
+    appShell.broadcast("stt:error", payload);
   },
   hasActiveSession: () => sttManager.hasActiveSession(),
   getActiveSessionId: () => sttManager.getActiveSessionId(),
   onStartSession: async (sessionId) => {
+    const mainWindow = appShell.getMainWindow();
     if (!mainWindow || mainWindow.isDestroyed()) {
       throw new Error("Main window is not available.");
     }
@@ -489,72 +390,6 @@ registerAppIpcHandlers({
 });
 
 sttManager.registerIpcHandlers(ipcMain);
-
-function ensureTray() {
-  if (tray) return;
-  const iconPath = getIconPath();
-  if (!iconPath) return;
-
-  tray = new Tray(iconPath);
-  tray.setToolTip(APP_NAME);
-
-  tray.on("click", () => {
-    if (!mainWindow || mainWindow.isDestroyed()) return;
-    if (mainWindow.isVisible()) mainWindow.hide();
-    else {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-
-  const rebuildMenu = () => {
-    const mainVisible = Boolean(
-      mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible(),
-    );
-    const menu = Menu.buildFromTemplate([
-      {
-        label: mainVisible ? "Ocultar" : "Mostrar",
-        click: () => {
-          if (mainVisible) mainWindow?.hide();
-          else {
-            mainWindow?.show();
-            mainWindow?.focus();
-          }
-        },
-      },
-      { type: "separator" },
-      {
-        label: hudController.isHudVisible() ? "Ocultar HUD" : "Mostrar HUD",
-        click: () => {
-          hudController.setHudVisible(!hudController.isHudVisible());
-          rebuildMenu();
-        },
-      },
-      { type: "separator" },
-      {
-        label: "Sair",
-        click: () => {
-          isQuitting = true;
-          try {
-            tray?.destroy();
-          } catch {
-            // ignore
-          }
-          tray = null;
-          app.quit();
-        },
-      },
-    ]);
-    tray?.setContextMenu(menu);
-  };
-
-  mainWindow?.on("show", rebuildMenu);
-  mainWindow?.on("hide", rebuildMenu);
-  const hudWindow = hudController.getHudWindow();
-  hudWindow?.on("show", rebuildMenu);
-  hudWindow?.on("hide", rebuildMenu);
-  rebuildMenu();
-}
 
 async function bootstrap() {
   if (process.platform === "win32") {
@@ -592,14 +427,15 @@ async function bootstrap() {
     azureCredentialSource: stores.getResolvedAzureCredentials().source,
   });
 
-  mainWindow = await createMainWindow({
+  const mainWindow = await createMainWindow({
     devServerUrl: DEV_SERVER_URL,
-    getIconPath,
-    getPreloadPath,
-    resolveDistFile: (filename) => path.join(__dirname, "..", "dist", filename),
+    getIconPath: appShell.getIconPath,
+    getPreloadPath: appShell.getPreloadPath,
+    resolveDistFile: appShell.resolveDistFile,
     isQuitting: () => isQuitting,
-    getPreferredDisplay,
+    getPreferredDisplay: appShell.getPreferredDisplay,
   });
+  appShell.setMainWindow(mainWindow);
 
   // Frameless window controls
   ipcMain.on("window:minimize", () => mainWindow?.minimize());
@@ -619,41 +455,40 @@ async function bootstrap() {
     mainWindow?.webContents.send("window:maximized-change", false),
   );
 
-  await hudController.createHudWindow();
-  ensureTray();
-  attachDisplayListeners();
-  applyAdaptiveBounds();
-  setHudState({ state: "idle" });
+  await appShell.hudController.createHudWindow();
+  appShell.ensureTray();
+  appShell.attachDisplayListeners();
+  appShell.applyAdaptiveBounds();
+  appShell.setHudState({ state: "idle" });
 
   await hotkeyService.reloadHotkeys();
 
   const startupBlockedReason = refreshCaptureBlockedReason();
   if (startupBlockedReason === getAzureConfigMissingMessage()) {
-    emitAppError(startupBlockedReason);
-    setHudState({ state: "error", message: startupBlockedReason });
+    appShell.emitAppError(startupBlockedReason);
+    appShell.setHudState({ state: "error", message: startupBlockedReason });
   }
 
   app.on("browser-window-focus", () => {
-    hudController.ensureHudAlwaysOnTop();
+    appShell.hudController.ensureHudAlwaysOnTop();
   });
   app.on("browser-window-blur", () => {
-    hudController.ensureHudAlwaysOnTop();
+    appShell.hudController.ensureHudAlwaysOnTop();
   });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       void createMainWindow({
         devServerUrl: DEV_SERVER_URL,
-        getIconPath,
-        getPreloadPath,
-        resolveDistFile: (filename) =>
-          path.join(__dirname, "..", "dist", filename),
+        getIconPath: appShell.getIconPath,
+        getPreloadPath: appShell.getPreloadPath,
+        resolveDistFile: appShell.resolveDistFile,
         isQuitting: () => isQuitting,
-        getPreferredDisplay,
+        getPreferredDisplay: appShell.getPreferredDisplay,
       }).then((created) => {
-        mainWindow = created;
-        ensureTray();
-        applyAdaptiveBounds();
+        appShell.setMainWindow(created);
+        appShell.ensureTray();
+        appShell.applyAdaptiveBounds();
       });
     }
   });
@@ -669,7 +504,7 @@ app
       error: error instanceof Error ? error.message : String(error),
     });
     try {
-      setHudState({
+      appShell.setHudState({
         state: "error",
         message: "Falha ao iniciar app (dev server).",
       });
@@ -685,14 +520,9 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
-  detachDisplayListeners();
-  hudController.stopHudHoverPolling();
+  appShell.detachDisplayListeners();
+  appShell.hudController.stopHudHoverPolling();
   hotkeyService.stop();
   sttManager.dispose();
-  try {
-    tray?.destroy();
-  } catch {
-    // ignore
-  }
-  tray = null;
+  appShell.destroyTray();
 });
