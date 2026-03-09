@@ -2,40 +2,41 @@
 
 Windows-first desktop dictation app built with Electron, React, TypeScript, and Azure Speech-to-Text.
 
-## Status
+See [`CHANGELOG.md`](./CHANGELOG.md) for release notes and recent changes.
 
-Active.
+## Overview
 
-It captures microphone audio while the global hotkey is held, streams audio to Azure STT, and inserts the final transcript into the active app. The project also includes a transparent HUD, configurable settings, smart post-processing, and optional local history.
+Vox Type captures microphone audio while a global hotkey is held, streams speech to Azure STT, post-processes the transcript, and injects the final text into the active Windows application. The app also includes a transparent HUD, configurable safety/privacy controls, optional local history, and adaptive language helpers.
 
-## Scope
+## Core Capabilities
 
-- Platform: desktop, Windows-first
-- Runtime: Electron + Vite + React
-- Speech provider: Azure Speech-to-Text only
-- Primary interaction: hold-to-talk global hotkey
+- Global push-to-talk dictation flow
+- Streaming 16 kHz mono PCM transcription with Azure Speech-to-Text
+- Automatic text insertion on Windows with clipboard-safe fallback paths
+- Always-on-top transparent HUD for capture and status feedback
+- Configurable hotkeys, session limits, formatting, rewrite, and confidence policies
+- Optional local history with privacy mode and encrypted storage support where available
+- Adaptive suggestions for protected terms, app-specific language bias, and formatting
 
-## Main Features
+## Tech Stack
 
-- Global push-to-talk capture flow
-- Streaming 16kHz mono PCM transcription with Azure STT
-- Automatic text insertion on Windows with clipboard-safe fallback
-- Always-on-top transparent HUD
-- Configurable hotkey and session settings
-- Smart text cleanup and dictionary fixes
-- Optional local transcription history with privacy controls
+- Electron for the desktop shell and Windows integrations
+- React + Vite for the renderer and settings UI
+- TypeScript across renderer and main process
+- Vitest for web and Electron-side tests
 
 ## Requirements
 
-- Node.js 20+ and npm
+- Node.js 20+
+- npm
 - Azure Speech resource with:
   - `AZURE_SPEECH_KEY`
   - `AZURE_SPEECH_REGION`
-- Windows for the full desktop workflow and installer packaging
+- Windows for the full desktop workflow, global hotkeys, auto paste, and packaging
 
-## Local Setup
+## Getting Started
 
-1. Create `.env.local` from `.env.example`.
+1. Create `.env.local` from [`.env.example`](./.env.example).
 2. Install dependencies:
 
 ```bash
@@ -48,9 +49,9 @@ npm ci --workspaces=false
 npm run dev:desktop
 ```
 
-## Environment
+## Environment Configuration
 
-Base environment variables are documented in [`.env.example`](.env.example).
+The baseline environment contract lives in [`.env.example`](./.env.example).
 
 Most relevant variables:
 
@@ -61,27 +62,32 @@ Most relevant variables:
 - `VOICE_HOTKEY_FALLBACK`
 - `VOICE_HOLD_TO_TALK`
 - `VOICE_AUTO_PASTE`
+- `VOICE_LOW_CONFIDENCE_POLICY`
 - `VOICE_HUD`
 - `VOICE_MAX_SESSION_SECONDS`
 
-For local development, `.env.local` remains supported.
+Notes:
 
-For packaged Windows builds, Azure credentials can be configured either:
+- `.env.local` is supported for local development only and must never be committed.
+- Packaged Windows builds can store Azure credentials through Electron `safeStorage`, with environment variables as a fallback.
+- `VOICE_*` variables act as first-boot defaults and can be overridden later in the settings UI.
 
-- in the app settings and stored with Electron `safeStorage`
-- in OS environment variables as a fallback
+## Quality Checks
 
-Hotkey and session limits can also be changed at runtime from the settings screen. The `VOICE_*` values act as defaults for first boot.
-
-## Validation
-
-Run the core checks locally:
+Core validation:
 
 ```bash
 npm run lint
 npm run typecheck
 npm run test
+```
+
+Additional maintenance checks:
+
+```bash
 npm run deadcode
+npm run deps:cycles
+npm run format:check
 ```
 
 Full quality gate:
@@ -90,9 +96,9 @@ Full quality gate:
 npm run quality
 ```
 
-## Build
+## Build and Packaging
 
-Build renderer + Electron main process:
+Build renderer plus Electron main process:
 
 ```bash
 npm run build:desktop
@@ -106,17 +112,18 @@ npm run dist:win
 
 Packaging should be executed on Windows.
 
-## Repository Structure
+## Repository Layout
 
 ```text
-electron/     Electron main process, IPC, stores, Windows integrations
-src/          React renderer, HUD UI, hooks, shared frontend logic
-public/       Static assets required at runtime
+electron/     Electron main process, IPC handlers, stores, and Windows integrations
+src/          React renderer, HUD UI, hooks, and shared frontend logic
+public/       Runtime static assets
 scripts/      Small project maintenance scripts
 assets/       Source assets used to generate app icons
 ```
 
-## Notes
+## Repository Hygiene
 
-- This repository is intentionally focused on source code, runtime assets, tests, and build/config files required to review, run, and package the project.
-- Local artifacts, playground files, and tool-specific leftovers are excluded from version control.
+- Keep the repository focused on source code, runtime assets, tests, and build/config files.
+- Do not commit `.env.local`, generated bundles, installer outputs, or local scratch files.
+- Treat Azure credentials, secure storage exports, and local history/adaptive data as sensitive.

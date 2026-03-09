@@ -6,6 +6,12 @@ import {
   writeTextFileAtomic,
 } from './store-utils.js';
 
+type AdaptiveStoreCodec = {
+  isEncryptionAvailable?: () => boolean;
+  encryptString?: (value: string) => string;
+  decryptString?: (value: string) => string;
+};
+
 type AdaptiveTermStats = {
   term: string;
   count: number;
@@ -120,10 +126,12 @@ function parseState(raw: unknown): AdaptiveStoreState {
 
 export class AdaptiveStore {
   private readonly filePath: string;
+  private readonly codec?: AdaptiveStoreCodec;
   private cached: AdaptiveStoreState = { ...EMPTY_STATE };
 
-  constructor(filePath: string) {
+  constructor(filePath: string, codec?: AdaptiveStoreCodec) {
     this.filePath = filePath;
+    this.codec = codec;
   }
 
   get() {
@@ -231,18 +239,43 @@ export class AdaptiveStore {
   }
 
   private async persist(state: AdaptiveStoreState) {
-    await writeTextFileAtomic(this.filePath, JSON.stringify(wrapStoreEnvelope(state), null, 2));
+    await writeTextFileAtomic(
+      this.filePath,
+      this.encodeContent(JSON.stringify(wrapStoreEnvelope(state), null, 2)),
+    );
+  }
+
+  private decodeContent(content: string) {
+    if (!this.codec?.decryptString) return content;
+    try {
+      return this.codec.decryptString(content);
+    } catch {
+      return content;
+    }
+  }
+
+  private encodeContent(content: string) {
+    if (!this.codec?.encryptString || !this.codec.isEncryptionAvailable?.()) return content;
+    try {
+      return this.codec.encryptString(content);
+    } catch {
+      return content;
+    }
   }
 
   private tryParse(content: string | null) {
     if (content == null) return null;
 
     try {
-      const raw = JSON.parse(content);
+      const raw = JSON.parse(this.decodeContent(content));
       const envelope = unwrapStoreEnvelope<unknown>(raw);
       return {
         state: parseState(envelope.data),
-        needsMigration: envelope.version < 1,
+        needsMigration:
+          envelope.version < 1 ||
+          (this.codec?.isEncryptionAvailable?.() === true &&
+            this.codec?.decryptString !== undefined &&
+            this.decodeContent(content) === content),
       };
     } catch {
       return null;

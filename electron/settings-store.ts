@@ -83,7 +83,7 @@ export const DEFAULT_CANONICAL_TERMS: CanonicalTerm[] = [
 const DEFAULT_SETTINGS: AppSettings = {
   hotkeyPrimary: 'CommandOrControl+Super',
   hotkeyFallback: 'CommandOrControl+Super+Space',
-  autoPasteEnabled: false,
+  autoPasteEnabled: true,
   toneMode: 'casual',
   languageMode: 'pt-BR',
   sttProvider: 'azure',
@@ -103,7 +103,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   rewriteMode: 'safe',
   intentDetectionEnabled: true,
   protectedTerms: [],
-  lowConfidencePolicy: 'review',
+  lowConfidencePolicy: 'paste',
   adaptiveLearningEnabled: true,
   appProfiles: {},
 };

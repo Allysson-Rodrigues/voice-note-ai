@@ -49,6 +49,7 @@ import { rewriteTranscript } from './modules/transcript-rewrite.js';
 import { createTextInjectionService } from './modules/text-injection.js';
 import { installSessionSecurity } from './modules/window-security.js';
 import { PerfStore } from './perf-store.js';
+import { canPersistAdaptiveLearning, canUseHistoryPhraseBoost } from './privacy-rules.js';
 import {
   DEFAULT_CANONICAL_TERMS,
   SettingsStore,
@@ -176,11 +177,11 @@ let settings: AppSettings = {
   intentDetectionEnabled: parseBooleanEnv(process.env.VOICE_INTENT_DETECTION_ENABLED) ?? true,
   protectedTerms: [],
   lowConfidencePolicy:
-    (process.env.VOICE_LOW_CONFIDENCE_POLICY ?? 'review') === 'paste'
+    (process.env.VOICE_LOW_CONFIDENCE_POLICY ?? 'paste') === 'paste'
       ? 'paste'
-      : (process.env.VOICE_LOW_CONFIDENCE_POLICY ?? 'review') === 'copy-only'
+      : (process.env.VOICE_LOW_CONFIDENCE_POLICY ?? 'paste') === 'copy-only'
         ? 'copy-only'
-        : 'review',
+        : 'paste',
   adaptiveLearningEnabled: parseBooleanEnv(process.env.VOICE_ADAPTIVE_LEARNING_ENABLED) ?? true,
   appProfiles: {},
 };
@@ -220,7 +221,12 @@ function getPerfStore() {
 
 function getAdaptiveStore() {
   if (!adaptiveStore) {
-    adaptiveStore = new AdaptiveStore(path.join(app.getPath('userData'), 'adaptive.json'));
+    adaptiveStore = new AdaptiveStore(path.join(app.getPath('userData'), 'adaptive.json'), {
+      isEncryptionAvailable: () =>
+        settings.historyStorageMode === 'encrypted' && safeStorage.isEncryptionAvailable(),
+      encryptString: (value) => safeStorage.encryptString(value).toString('base64'),
+      decryptString: (value) => safeStorage.decryptString(Buffer.from(value, 'base64')),
+    });
   }
   return adaptiveStore;
 }
@@ -256,6 +262,7 @@ function tokenizePhraseCandidates(text: string) {
 }
 
 async function getRecentHistoryPhrases(limit = 40) {
+  if (!canUseHistoryPhraseBoost(settings)) return [];
   try {
     const entries = await getHistoryStore().list({ limit });
     const counts = new Map<string, number>();
@@ -576,7 +583,7 @@ const sttManager = createSttSessionManager({
       },
       settings.historyRetentionDays,
     );
-    if (settings.adaptiveLearningEnabled) {
+    if (canPersistAdaptiveLearning(settings)) {
       await getAdaptiveStore().observeSession({
         appKey: entry.appKey ?? undefined,
         text: entry.text,

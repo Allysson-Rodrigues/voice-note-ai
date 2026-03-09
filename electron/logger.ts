@@ -49,10 +49,11 @@ function stringifyContext(context?: Record<string, unknown>) {
 }
 
 function write(level: LogLevel, message: string, context?: Record<string, unknown>) {
+  const safeContext = sanitizeContext(context);
   const entry: LogEntry = {
     level,
     message,
-    context,
+    context: safeContext,
     timestamp: new Date().toISOString(),
   };
   recentLogs.push(entry);
@@ -60,7 +61,7 @@ function write(level: LogLevel, message: string, context?: Record<string, unknow
     recentLogs.splice(0, recentLogs.length - RECENT_LOG_LIMIT);
   }
 
-  const line = `[${level}] ${entry.timestamp} ${message}${stringifyContext(context)}`;
+  const line = `[${level}] ${entry.timestamp} ${message}${stringifyContext(safeContext)}`;
   if (level === 'error') console.error(line);
   else if (level === 'warn') console.warn(line);
   else console.log(line);
