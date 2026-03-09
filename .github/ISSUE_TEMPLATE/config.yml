@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security reporting guidance
+    url: https://github.com/Allysson-Rodrigues/voice-note-ai/blob/main/SECURITY.md
+    about: Please review the security policy before disclosing vulnerabilities or sharing sensitive data.

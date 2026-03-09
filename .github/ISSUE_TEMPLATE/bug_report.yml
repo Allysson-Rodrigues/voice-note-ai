@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a reproducible defect in Vox Type
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please keep credentials, transcript content, and other sensitive data out of public issues.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken?
+      placeholder: Auto paste stops after the first session when dictation ends.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide a minimal, deterministic sequence.
+      placeholder: |
+        1. Start the app
+        2. Hold the push-to-talk hotkey
+        3. Speak a short sentence
+        4. Release the hotkey
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Windows
+        - Linux
+        - macOS
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+      placeholder: v1.0.4 or commit SHA
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Add logs, screenshots, or recordings only after redacting sensitive data.

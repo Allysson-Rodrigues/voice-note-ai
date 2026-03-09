@@ -134,6 +134,12 @@ assets/       Source assets used to generate app icons
 - Do not commit `.env.local`, generated bundles, installer outputs, or local scratch files.
 - Treat Azure credentials, secure storage exports, and local history/adaptive data as sensitive.
 
+## Collaboration
+
+- Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
+- Use the GitHub issue templates for bugs and feature requests so reports are reproducible and triageable.
+- Review [SECURITY.md](./SECURITY.md) before reporting vulnerabilities or sharing logs that may contain sensitive data.
+
 ## License
 
 This project is licensed under `PolyForm Noncommercial 1.0.0`. Commercial use, resale, and other commercial exploitation are not permitted under this repository license. See [LICENSE](./LICENSE).
