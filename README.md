@@ -2,6 +2,8 @@
 
 Windows-first desktop dictation app built with Electron, React, TypeScript, and Azure Speech-to-Text.
 
+[![CI](https://github.com/Allysson-Rodrigues/voice-note-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/Allysson-Rodrigues/voice-note-ai/actions/workflows/ci.yml)
+
 See [`CHANGELOG.md`](./CHANGELOG.md) for release notes and recent changes.
 
 ## Overview
@@ -48,6 +50,22 @@ npm ci --workspaces=false
 ```bash
 npm run dev:desktop
 ```
+
+## Windows Packaging
+
+Create the production desktop bundle:
+
+```bash
+npm run build:desktop
+```
+
+Create the Windows installer:
+
+```bash
+npm run dist:win
+```
+
+Packaging should be executed on Windows.
 
 ## Environment Configuration
 
@@ -98,19 +116,7 @@ npm run quality
 
 ## Build and Packaging
 
-Build renderer plus Electron main process:
-
-```bash
-npm run build:desktop
-```
-
-Create a Windows installer:
-
-```bash
-npm run dist:win
-```
-
-Packaging should be executed on Windows.
+The packaged application includes the renderer bundle, Electron main process, preload scripts, and required runtime assets declared in `package.json`.
 
 ## Repository Layout
 
@@ -127,3 +133,7 @@ assets/       Source assets used to generate app icons
 - Keep the repository focused on source code, runtime assets, tests, and build/config files.
 - Do not commit `.env.local`, generated bundles, installer outputs, or local scratch files.
 - Treat Azure credentials, secure storage exports, and local history/adaptive data as sensitive.
+
+## License
+
+No license file is published yet. Add one explicitly before treating this repository as open-source for reuse or redistribution.
