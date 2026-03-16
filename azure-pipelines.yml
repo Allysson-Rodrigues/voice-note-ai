@@ -9,7 +9,9 @@ pool:
   vmImage: 'windows-latest' # Necessário para build nativo de Windows (nsis/electron-builder)
 
 variables:
-  projectDir: '01-projetos/voice-note-ai'
+  - group: 'Global-Secrets' # IMPORTANTE: Linka com a Library do Azure DevOps
+  - name: projectDir
+    value: '01-projetos/voice-note-ai'
 
 steps:
   - checkout: self
