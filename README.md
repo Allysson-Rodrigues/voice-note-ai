@@ -82,6 +82,18 @@ npm run dist:win
 
 Packaging should be executed on Windows.
 
+## Deployment & CI/CD (Azure DevOps)
+
+This project is configured for automated builds and quality checks via Azure Pipelines.
+
+- **Pipeline Configuration:** See [`azure-pipelines.yml`](./azure-pipelines.yml).
+- **Environment Secrets:** For the pipeline to run correctly, you must configure the following variables in the **Azure DevOps Library** (Variable Group: `Global-Secrets`):
+    - `AZURE_STT_KEY`: Your Azure Speech-to-Text key.
+    - `AZURE_STT_REGION`: Your Azure region (e.g., `eastus`).
+- **Artifacts:** Every successful build on `main` or `develop` produces a Windows `.exe` installer available in the Azure Pipelines "Artifacts" section.
+
+For detailed connectivity instructions, refer to the [Connectivity Checklist](../../docs/operacao/azure-devops/CONNECTIVITY_CHECKLIST.md).
+
 ## Environment Configuration
 
 The baseline environment contract lives in [`.env.example`](./.env.example).

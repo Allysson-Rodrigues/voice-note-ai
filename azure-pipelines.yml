@@ -1,0 +1,61 @@
+# Pipeline for Voice Note AI (vox-type)
+# Build and Package Electron App for Windows
+
+trigger:
+  - main
+  - develop
+
+pool:
+  vmImage: 'windows-latest' # Necessário para build nativo de Windows (nsis/electron-builder)
+
+variables:
+  projectDir: '01-projetos/voice-note-ai'
+
+steps:
+  - checkout: self
+    fetchDepth: 1
+
+  - task: NodeTool@0
+    inputs:
+      versionSpec: '20.x'
+    displayName: 'Install Node.js'
+
+  - task: Cache@2
+    inputs:
+      key: 'npm | "$(Agent.OS)" | $(projectDir)/package-lock.json'
+      restoreKeys: |
+        npm | "$(Agent.OS)"
+      path: $(projectDir)/node_modules
+    displayName: 'Cache npm dependencies'
+
+  - script: |
+      cd $(projectDir)
+      npm ci
+    displayName: 'Install dependencies'
+
+  - script: |
+      cd $(projectDir)
+      npm run quality:strict
+    displayName: 'Quality Check (Lint, Typecheck, Tests, Cycles)'
+    env:
+      AZURE_STT_KEY: $(AZURE_STT_KEY)
+      AZURE_STT_REGION: $(AZURE_STT_REGION)
+
+  - script: |
+      cd $(projectDir)
+      npm run dist:win
+    displayName: 'Build and Package Windows App'
+
+  - task: CopyFiles@2
+    inputs:
+      SourceFolder: '$(projectDir)/dist'
+      Contents: '*.exe'
+      TargetFolder: '$(Build.ArtifactStagingDirectory)'
+    displayName: 'Copy Installer to Staging'
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+      ArtifactName: 'windows-installer'
+      publishLocation: 'Container'
+    displayName: 'Publish Windows Installer'
