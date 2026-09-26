@@ -25,7 +25,7 @@ describe("history store", () => {
         retryCount: 0,
         sessionDurationMs: 1200,
         injectTotalMs: 180,
-        createdAt: "2026-03-01T10:00:00.000Z",
+        createdAt: new Date(Date.now() - 2000).toISOString(),
       },
       30,
     );
@@ -37,7 +37,7 @@ describe("history store", () => {
         retryCount: 1,
         sessionDurationMs: 1800,
         injectTotalMs: 260,
-        createdAt: "2026-03-01T10:01:00.000Z",
+        createdAt: new Date(Date.now() - 1000).toISOString(),
       },
       30,
     );
